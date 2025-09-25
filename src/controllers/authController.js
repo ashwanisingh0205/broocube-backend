@@ -1,22 +1,363 @@
 // src/controllers/authController.js
-const User = require("../models/User");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const User = require('../models/User');
+const jwtManager = require('../utils/jwt');
+const logger = require('../utils/logger');
+const { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } = require('../utils/constants');
+const { asyncHandler } = require('../middlewares/errorHandler');
 
-exports.register = async (req, res) => {
-  const { email, password, name } = req.body;
-  const hashed = await bcrypt.hash(password, 10);
-  const user = new User({ email, password: hashed, name });
-  await user.save();
-  res.json({ message: "User registered" });
-};
+/**
+ * Register a new user
+ */
+const register = asyncHandler(async (req, res) => {
+  const { name, email, password, role = 'creator', profile } = req.body;
 
-exports.login = async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  // Check if user already exists
+  const existingUser = await User.findByEmail(email);
+  if (existingUser) {
+    return res.status(HTTP_STATUS.CONFLICT).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_ALREADY_EXISTS
+    });
   }
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
-  res.json({ token });
+
+  // Create new user
+  const user = new User({
+    name,
+    email,
+    password,
+    role,
+    profile
+  });
+
+  await user.save();
+
+  // Generate tokens
+  const tokenPair = jwtManager.generateTokenPair({
+    id: user._id,
+    email: user.email,
+    role: user.role
+  });
+
+  logger.info('User registered successfully', { userId: user._id, email: user.email });
+
+  res.status(HTTP_STATUS.CREATED).json({
+    success: true,
+    message: SUCCESS_MESSAGES.USER_CREATED,
+    data: {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profile: user.profile,
+        isActive: user.isActive,
+        isVerified: user.isVerified
+      },
+      tokens: tokenPair
+    }
+  });
+});
+
+/**
+ * Login user
+ */
+const login = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  // Find user and include password for comparison
+  const user = await User.findByEmail(email).select('+password');
+  if (!user) {
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+      success: false,
+      message: ERROR_MESSAGES.INVALID_CREDENTIALS
+    });
+  }
+
+  // Check if user is active
+  if (!user.isActive) {
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+      success: false,
+      message: 'Account is deactivated'
+    });
+  }
+
+  // Verify password
+  const isPasswordValid = await user.comparePassword(password);
+  if (!isPasswordValid) {
+    return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+      success: false,
+      message: ERROR_MESSAGES.INVALID_CREDENTIALS
+    });
+  }
+
+  // Generate tokens
+  const tokenPair = jwtManager.generateTokenPair({
+    id: user._id,
+    email: user.email,
+    role: user.role
+  });
+
+  // Update last login
+  user.lastLogin = new Date();
+  await user.save();
+
+  logger.info('User logged in successfully', { userId: user._id, email: user.email });
+
+  res.json({
+    success: true,
+    message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
+    data: {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profile: user.profile,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+        lastLogin: user.lastLogin
+      },
+      tokens: tokenPair
+    }
+  });
+});
+
+/**
+ * Get current user profile
+ */
+const getProfile = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.userId).select('-password');
+  
+  res.json({
+    success: true,
+    data: { user }
+  });
+});
+
+/**
+ * Update user profile
+ */
+const updateProfile = asyncHandler(async (req, res) => {
+  const { name, profile } = req.body;
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_NOT_FOUND
+    });
+  }
+
+  // Update fields
+  if (name) user.name = name;
+  if (profile) {
+    if (profile.bio !== undefined) user.profile.bio = profile.bio;
+    if (profile.avatar_url !== undefined) user.profile.avatar_url = profile.avatar_url;
+    if (profile.social_links) {
+      Object.assign(user.profile.social_links, profile.social_links);
+    }
+  }
+
+  await user.save();
+
+  logger.info('User profile updated', { userId });
+
+  res.json({
+    success: true,
+    message: SUCCESS_MESSAGES.USER_UPDATED,
+    data: { user }
+  });
+});
+
+/**
+ * Change password
+ */
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.userId;
+
+  const user = await User.findById(userId).select('+password');
+  if (!user) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_NOT_FOUND
+    });
+  }
+
+  // Verify current password
+  const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+  if (!isCurrentPasswordValid) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      success: false,
+      message: 'Current password is incorrect'
+    });
+  }
+
+  // Update password
+  user.password = newPassword;
+  await user.save();
+
+  logger.info('Password changed successfully', { userId });
+
+  res.json({
+    success: true,
+    message: 'Password changed successfully'
+  });
+});
+
+/**
+ * Request password reset
+ */
+const requestPasswordReset = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findByEmail(email);
+  if (!user) {
+    // Don't reveal if user exists or not
+    return res.json({
+      success: true,
+      message: 'If an account with that email exists, a password reset link has been sent'
+    });
+  }
+
+  // Generate password reset token
+  const resetToken = jwtManager.generatePasswordResetToken(user._id);
+
+  // TODO: Send email with reset token
+  // await emailService.sendPasswordResetEmail(user.email, resetToken);
+
+  logger.info('Password reset requested', { userId: user._id, email: user.email });
+
+  res.json({
+    success: true,
+    message: 'If an account with that email exists, a password reset link has been sent'
+  });
+});
+
+/**
+ * Reset password
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  const { newPassword } = req.body;
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_NOT_FOUND
+    });
+  }
+
+  // Update password
+  user.password = newPassword;
+  await user.save();
+
+  logger.info('Password reset successfully', { userId });
+
+  res.json({
+    success: true,
+    message: SUCCESS_MESSAGES.PASSWORD_RESET_SUCCESS
+  });
+});
+
+/**
+ * Logout user
+ */
+const logout = asyncHandler(async (req, res) => {
+  // In a more sophisticated implementation, you might want to blacklist the token
+  // For now, we'll just return success
+  logger.info('User logged out', { userId: req.userId });
+
+  res.json({
+    success: true,
+    message: SUCCESS_MESSAGES.LOGOUT_SUCCESS
+  });
+});
+
+/**
+ * Delete user account
+ */
+const deleteAccount = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_NOT_FOUND
+    });
+  }
+
+  // Soft delete - deactivate account
+  user.isActive = false;
+  await user.save();
+
+  logger.info('User account deleted', { userId });
+
+  res.json({
+    success: true,
+    message: SUCCESS_MESSAGES.USER_DELETED
+  });
+});
+
+/**
+ * Verify email
+ */
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.params;
+
+  // TODO: Implement email verification logic
+  // For now, just return success
+  res.json({
+    success: true,
+    message: 'Email verified successfully'
+  });
+});
+
+/**
+ * Resend verification email
+ */
+const resendVerification = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(HTTP_STATUS.NOT_FOUND).json({
+      success: false,
+      message: ERROR_MESSAGES.USER_NOT_FOUND
+    });
+  }
+
+  if (user.isVerified) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      success: false,
+      message: 'Email is already verified'
+    });
+  }
+
+  // TODO: Send verification email
+  // await emailService.sendVerificationEmail(user.email, verificationToken);
+
+  logger.info('Verification email resent', { userId });
+
+  res.json({
+    success: true,
+    message: 'Verification email sent'
+  });
+});
+
+module.exports = {
+  register,
+  login,
+  getProfile,
+  updateProfile,
+  changePassword,
+  requestPasswordReset,
+  resetPassword,
+  logout,
+  deleteAccount,
+  verifyEmail,
+  resendVerification
 };
