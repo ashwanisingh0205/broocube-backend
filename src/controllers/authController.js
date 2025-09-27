@@ -206,9 +206,10 @@ const changePassword = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * Request password reset
- */
+// ...existing code...
+const emailService = require('../services/notifier/email');
+// ...existing code...
+
 const requestPasswordReset = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
@@ -224,8 +225,9 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
   // Generate password reset token
   const resetToken = jwtManager.generatePasswordResetToken(user._id);
 
-  // TODO: Send email with reset token
-  // await emailService.sendPasswordResetEmail(user.email, resetToken);
+  // Send email with reset token
+  const resetUrl = `${process.env.CORS_ORIGIN || 'http://localhost:3000'}/reset-password/${resetToken}`;
+  await emailService.sendPasswordResetEmail(user.email, resetUrl);
 
   logger.info('Password reset requested', { userId: user._id, email: user.email });
 
@@ -234,6 +236,7 @@ const requestPasswordReset = asyncHandler(async (req, res) => {
     message: 'If an account with that email exists, a password reset link has been sent'
   });
 });
+// ...existing code...
 
 /**
  * Reset password

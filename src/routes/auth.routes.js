@@ -21,5 +21,3 @@ router.get('/verify/:token', ctrl.verifyEmail);
 router.post('/resend-verification', authenticate, ctrl.resendVerification);
 
 module.exports = router;
-
-

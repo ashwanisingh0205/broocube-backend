@@ -1,3 +1,4 @@
+
 // src/middlewares/auth.js
 const jwtManager = require('../utils/jwt');
 const User = require('../models/User');
