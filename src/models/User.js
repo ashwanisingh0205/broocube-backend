@@ -81,7 +81,45 @@ const userSchema = new mongoose.Schema({
       default: Date.now,
       expires: 2592000 // 30 days
     }
-  }]
+  }],
+  socialAccounts: {
+    twitter: {
+      id: String,
+      username: String,
+      name: String,
+      accessToken: String,
+      refreshToken: String,
+      expiresAt: Date,
+      connectedAt: Date
+    },
+    instagram: {
+      id: String,
+      username: String,
+      name: String,
+      accessToken: String,
+      refreshToken: String,
+      expiresAt: Date,
+      connectedAt: Date
+    },
+    facebook: {
+      id: String,
+      username: String,
+      name: String,
+      accessToken: String,
+      refreshToken: String,
+      expiresAt: Date,
+      connectedAt: Date
+    },
+    linkedin: {
+      id: String,
+      username: String,
+      name: String,
+      accessToken: String,
+      refreshToken: String,
+      expiresAt: Date,
+      connectedAt: Date
+    }
+  }
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

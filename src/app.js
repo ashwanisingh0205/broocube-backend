@@ -18,6 +18,7 @@ const bidRoutes = require("./routes/bid.routes");
 const analyticsRoutes = require("./routes/analytics.routes");
 const adminRoutes = require("./routes/admin.routes");
 const aiRoutes = require("./routes/ai.routes");
+const twitterRoutes = require("./routes/twitter.routes");
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/api/bids", bidRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/twitter", twitterRoutes);
 const healthRoutes = require("./routes/health.routes");
 app.use("/api", healthRoutes);
 
