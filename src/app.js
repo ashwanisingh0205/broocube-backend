@@ -44,6 +44,9 @@ app.use("/api/bids", bidRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
+const healthRoutes = require("./routes/health.routes");
+app.use("/api", healthRoutes);
+
 
 // 404 and error handlers
 app.use(notFound);

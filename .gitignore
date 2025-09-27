@@ -1,39 +1,22 @@
-# Node modules
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment variables
+# Environment files
 .env
 .env.local
-.env.*.local
+.env.production
+.env.test
 
 # Logs
 logs
 *.log
-logs/*.log
-pids
-*.pid
-*.seed
-*.pid.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Uploads (if you store user files locally)
+uploads/
+
+# Node modules
+node_modules/
 
 # Build artifacts
 dist/
 build/
-coverage/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Docker
-docker-compose.override.yml
-
-# VSCode settings
-.vscode/
-*.code-workspace
-
-# Jest cache
-jest-cache/
-jest-debug.log
