@@ -1,6 +1,6 @@
 // src/routes/auth.routes.js
 const router = require('express').Router();
-const { authenticate } = require('../middlewares/auth');
+const { authenticate, validatePasswordResetToken } = require('../middlewares/auth');
 const { validateWithJoi, userValidation, validationRules, validateRequest } = require('../utils/validator');
 const { authLimiter, passwordResetLimiter } = require('../middlewares/rateLimiter');
 const ctrl = require('../controllers/authController');
@@ -13,7 +13,7 @@ router.put('/me', authenticate, validateWithJoi(userValidation.updateProfile), c
 router.post('/change-password', authenticate, ctrl.changePassword);
 
 router.post('/request-password-reset', passwordResetLimiter, ctrl.requestPasswordReset);
-router.post('/reset-password/:token', ctrl.resetPassword);
+router.post('/reset-password/:token', validatePasswordResetToken, ctrl.resetPassword);
 
 router.post('/logout', authenticate, ctrl.logout);
 
