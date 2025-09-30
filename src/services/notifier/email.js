@@ -51,6 +51,20 @@ async function sendPasswordResetEmail(to, resetUrl) {
   };
   await t.sendMail(mailOptions);
 }
-module.exports = { sendMail, sendPasswordResetEmail };
+
+async function sendVerificationEmail(to, verifyUrl) {
+  const t = getTransporter();
+  const mailOptions = {
+    from: config.EMAIL_FROM,
+    to,
+    subject: 'Verify your email address',
+    html: `<p>Welcome to Bloocube!</p>
+           <p>Please verify your email by clicking <a href="${verifyUrl}">this link</a>.</p>
+           <p>If you did not create an account, you can ignore this email.</p>`
+  };
+  await t.sendMail(mailOptions);
+}
+
+module.exports = { sendMail, sendPasswordResetEmail, sendVerificationEmail };
 
 

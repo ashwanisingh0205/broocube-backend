@@ -1,5 +1,6 @@
 // src/controllers/authController.js
 const User = require('../models/User');
+const dns = require('dns').promises;
 const jwtManager = require('../utils/jwt');
 const logger = require('../utils/logger');
 const { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } = require('../utils/constants');
@@ -20,6 +21,22 @@ const register = asyncHandler(async (req, res) => {
     });
   }
 
+  // Optional MX record verification
+  try {
+    if (process.env.VERIFY_EMAIL_MX === 'true') {
+      const domain = email.split('@')[1];
+      const mx = await dns.resolveMx(domain);
+      if (!mx || mx.length === 0) {
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          success: false,
+          message: 'Email domain does not accept mail'
+        });
+      }
+    }
+  } catch (e) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ success: false, message: 'Invalid email domain' });
+  }
+
   // Create new user
   const user = new User({
     name,
@@ -31,12 +48,18 @@ const register = asyncHandler(async (req, res) => {
 
   await user.save();
 
-  // Generate tokens
-  const tokenPair = jwtManager.generateTokenPair({
-    id: user._id,
-    email: user.email,
-    role: user.role
-  });
+  // Do NOT auto-login; require email verification first
+
+  // Send email verification link
+  try {
+    const verifyToken = jwtManager.generateAccessToken({ id: user._id, type: 'email_verify' });
+    const origin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+    const verifyUrl = `${origin}/verify-email/${verifyToken}`;
+    const emailService = require('../services/notifier/email');
+    await emailService.sendVerificationEmail(user.email, verifyUrl);
+  } catch (e) {
+    logger.error('Failed to send verification email', e);
+  }
 
   logger.info('User registered successfully', { userId: user._id, email: user.email });
 
@@ -52,8 +75,7 @@ const register = asyncHandler(async (req, res) => {
         profile: user.profile,
         isActive: user.isActive,
         isVerified: user.isVerified
-      },
-      tokens: tokenPair
+      }
     }
   });
 });
@@ -310,13 +332,22 @@ const deleteAccount = asyncHandler(async (req, res) => {
  */
 const verifyEmail = asyncHandler(async (req, res) => {
   const { token } = req.params;
-
-  // TODO: Implement email verification logic
-  // For now, just return success
-  res.json({
-    success: true,
-    message: 'Email verified successfully'
-  });
+  const jwtManager = require('../utils/jwt');
+  try {
+    const decoded = jwtManager.verifyAccessToken(token);
+    if (decoded.type !== 'email_verify') {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ success: false, message: 'Invalid token' });
+    }
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({ success: false, message: ERROR_MESSAGES.USER_NOT_FOUND });
+    }
+    user.isVerified = true;
+    await user.save();
+    res.json({ success: true, message: 'Email verified successfully' });
+  } catch (e) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ success: false, message: e.message || 'Invalid token' });
+  }
 });
 
 /**
