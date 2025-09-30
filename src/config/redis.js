@@ -1,6 +1,5 @@
 // src/config/redis.js
 const redis = require('redis');
-const logger = require('../utils/logger');
 
 class RedisClient {
   constructor() {
@@ -9,101 +8,106 @@ class RedisClient {
   }
 
   async connect() {
-    try {
-      this.client = redis.createClient({
-        url: process.env.REDIS_URL || 'redis://localhost:6379',
-        retry_strategy: (options) => {
-          if (options.error && options.error.code === 'ECONNREFUSED') {
-            logger.error('Redis server connection refused');
-            return new Error('Redis server connection refused');
-          }
-          if (options.total_retry_time > 1000 * 60 * 60) {
-            logger.error('Redis retry time exhausted');
-            return new Error('Retry time exhausted');
-          }
-          if (options.attempt > 10) {
-            logger.error('Redis max retry attempts reached');
-            return undefined;
-          }
-          return Math.min(options.attempt * 100, 3000);
-        }
-      });
-
-      this.client.on('connect', () => {
-        logger.info('Redis client connected');
-        this.isConnected = true;
-      });
-
-      this.client.on('error', (err) => {
-        logger.error('Redis client error:', err);
-        this.isConnected = false;
-      });
-
-      this.client.on('end', () => {
-        logger.warn('Redis client disconnected');
-        this.isConnected = false;
-      });
-
-      await this.client.connect();
-      
-    } catch (error) {
-      logger.error('Redis connection failed:', error);
-      throw error;
+    // Skip Redis in dev mode if not configured
+    if (process.env.NODE_ENV === 'development' && !process.env.REDIS_URL) {
+      console.log('ℹ️ Redis connection skipped in development mode');
+      return;
     }
+
+    this.client = redis.createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
+      socket: {
+        connectTimeout: 5000,
+        reconnectStrategy: (retries) => {
+          if (retries > 3) {
+            console.log('⚠️ Redis: stopped retrying after 3 attempts');
+            return false;
+          }
+          return Math.min(retries * 200, 3000); // backoff
+        }
+      }
+    });
+
+    // Event listeners
+    this.client.on('connect', () => {
+      if (!this.isConnected) {
+        console.log('✅ Redis client connected');
+      }
+      this.isConnected = true;
+    });
+
+    this.client.on('error', (err) => {
+      console.log('❌ Redis error:', err.message);
+      this.isConnected = false;
+    });
+
+    this.client.on('end', () => {
+      console.log('⚠️ Redis client disconnected');
+      this.isConnected = false;
+    });
+
+    // Try initial connect without blocking server startup
+    this.client.connect().catch((err) => {
+      console.log('⚠️ Initial Redis connection failed:', err.message);
+      console.log('ℹ️ Server will continue without Redis (retry may happen)');
+    });
   }
 
   async get(key) {
+    if (!this.isConnected) return null;
     try {
-      if (!this.isConnected) await this.connect();
       return await this.client.get(key);
-    } catch (error) {
-      logger.error('Redis GET error:', error);
+    } catch (err) {
+      console.log('Redis GET error:', err.message);
       return null;
     }
   }
 
   async set(key, value, expireInSeconds = null) {
+    if (!this.isConnected) return false;
     try {
-      if (!this.isConnected) await this.connect();
       if (expireInSeconds) {
         return await this.client.setEx(key, expireInSeconds, value);
       }
       return await this.client.set(key, value);
-    } catch (error) {
-      logger.error('Redis SET error:', error);
+    } catch (err) {
+      console.log('Redis SET error:', err.message);
       return false;
     }
   }
 
   async del(key) {
+    if (!this.isConnected) return false;
     try {
-      if (!this.isConnected) await this.connect();
       return await this.client.del(key);
-    } catch (error) {
-      logger.error('Redis DEL error:', error);
+    } catch (err) {
+      console.log('Redis DEL error:', err.message);
       return false;
     }
   }
 
   async exists(key) {
+    if (!this.isConnected) return false;
     try {
-      if (!this.isConnected) await this.connect();
       return await this.client.exists(key);
-    } catch (error) {
-      logger.error('Redis EXISTS error:', error);
+    } catch (err) {
+      console.log('Redis EXISTS error:', err.message);
       return false;
     }
   }
 
   async disconnect() {
     if (this.client && this.isConnected) {
-      await this.client.quit();
-      this.isConnected = false;
-      logger.info('Redis client disconnected');
+      try {
+        await this.client.quit();
+        this.isConnected = false;
+        console.log('ℹ️ Redis client disconnected manually');
+      } catch (err) {
+        console.log('Redis disconnect error:', err.message);
+      }
     }
   }
 }
 
 const redisClient = new RedisClient();
-
 module.exports = redisClient;

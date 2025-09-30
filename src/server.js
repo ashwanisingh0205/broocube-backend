@@ -12,18 +12,22 @@ const PORT = config.PORT || 5000;
     console.log('Starting server...');
     await connectDB();
     console.log('Database connected');
-    await redis.connect();
-    console.log('Redis connected');
+    
+    // Try to connect to Redis, but don't fail if it's not available
+    try {
+      await redis.connect();
+      console.log('Redis connected');
+    } catch (error) {
+      console.log('Redis connection failed, continuing without Redis:', error.message);
+    }
 
     console.log('Starting HTTP server...');
     const server = app.listen(PORT, () => {
-      logger.info(`Backend running on port ${PORT}`);
       console.log(`Server is running on port ${PORT}`);
     });
 
     server.on('error', (error) => {
       console.error('Server error:', error);
-      logger.error('Server error', error);
     });
 
     server.on('listening', () => {
@@ -31,7 +35,6 @@ const PORT = config.PORT || 5000;
     });
   } catch (error) {
     console.error('Server startup error:', error);
-    logger.error('Failed to start server', error);
     process.exit(1);
   }
 })();

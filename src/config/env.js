@@ -38,6 +38,9 @@ const config = {
   YOUTUBE_CLIENT_ID: process.env.YOUTUBE_CLIENT_ID,
   YOUTUBE_CLIENT_SECRET: process.env.YOUTUBE_CLIENT_SECRET,
   
+  // Twitter OAuth
+  TWITTER_SCOPES: process.env.TWITTER_SCOPES || 'tweet.read users.read offline.access',
+  
   // AI Service Configuration
   AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
   AI_SERVICE_API_KEY: process.env.AI_SERVICE_API_KEY,
