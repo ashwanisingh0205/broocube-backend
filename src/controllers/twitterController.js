@@ -5,6 +5,19 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 
 class TwitterController {
+  // Add this to your TwitterController
+async testRoutes(req, res) {
+  const baseURL = `${req.protocol}://${req.get('host')}`;
+  
+  const testRoutes = {
+    'Callback debug': `${baseURL}/api/twitter/callback/debug?test=123`,
+    'Actual callback': `${baseURL}/api/twitter/callback`,
+    'Auth callback': `${baseURL}/auth/twitter/callback`,
+    'Generate auth URL': `${baseURL}/api/twitter/auth-url`
+  };
+  
+  res.json({ testRoutes });
+}
   // Generate Twitter OAuth URL
   async generateAuthURL(req, res) {
     try {
@@ -29,86 +42,51 @@ class TwitterController {
     }
   }
 
-  // Handle Twitter OAuth callback
-  async handleCallback(req, res) {
-    try {
-      const { code, state, redirectUri } = req.query;
-      const redirectToFrontend = config.FRONTEND_URL || 'http://localhost:3000';
+// Inside TwitterController.handleCallback
+async handleCallback(req, res) {
+  try {
+    const { code, state, redirectUri } = req.query;
+    const redirectToFrontend = config.FRONTEND_URL || 'http://localhost:3000';
 
-      console.log("📥 Callback query params:", { code, state, redirectUri });
-      console.log("📥 Request headers:", req.headers);
-      console.log("📥 Request method:", req.method);
-      console.log("📥 Full URL:", req.originalUrl);
+    console.log("🔍 DEBUG - Callback details:", {
+      code: code ? `present (${code.substring(0, 10)}...)` : 'missing',
+      state: state ? `present (${state.substring(0, 20)}...)` : 'missing',
+      redirectUri: redirectUri || 'missing',
+      hasCodeVerifier: state ? twitterService.codeVerifiers.has(state) : false,
+      availableStates: Array.from(twitterService.codeVerifiers.keys())
+    });
 
-      if (!code || !state || !redirectUri) {
-        const msg = 'Missing code, state or redirectUri';
-        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
-      }
-
-      // Verify state
-      let decodedState;
-      try {
-        decodedState = jwt.verify(state, config.JWT_SECRET);
-        console.log("✅ Decoded state:", decodedState);
-      } catch (error) {
-        console.error("❌ Invalid state:", error);
-        const msg = 'Invalid state';
-        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
-      }
-
-      // Exchange code for token
-      console.log("🔄 Exchanging code for token with redirectUri:", redirectUri);
-      const tokenResult = await twitterService.exchangeCodeForToken(code, redirectUri, state);
-      console.log("🔑 Token result:", tokenResult);
-
-      if (!tokenResult.success) {
-        const detail = tokenResult.raw?.error_description || tokenResult.raw?.detail || tokenResult.error || 'Token exchange failed';
-        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(detail))}`);
-      }
-
-      // Try to get profile, but don't fail the connection if it errors
-      let profileResult;
-      try {
-        profileResult = await twitterService.getUserProfile(tokenResult.access_token);
-        console.log("👤 Profile result:", profileResult);
-      } catch (e) {
-        console.log("👤 Profile fetch threw:", e);
-      }
-
-      const twitterProfile = profileResult?.success ? {
-        id: profileResult.user.id,
-        username: profileResult.user.username,
-        name: profileResult.user.name
-      } : undefined;
-
-      // Update DB (store tokens regardless; profile if available)
-      await User.findByIdAndUpdate(
-        decodedState.userId,
-        {
-          $set: {
-            'socialAccounts.twitter.accessToken': tokenResult.access_token,
-            'socialAccounts.twitter.refreshToken': tokenResult.refresh_token,
-            'socialAccounts.twitter.expiresAt': new Date(Date.now() + tokenResult.expires_in * 1000),
-            'socialAccounts.twitter.connectedAt': new Date(),
-            ...(twitterProfile && {
-              'socialAccounts.twitter.id': twitterProfile.id,
-              'socialAccounts.twitter.username': twitterProfile.username,
-              'socialAccounts.twitter.name': twitterProfile.name,
-            })
-          }
-        },
-        { upsert: true }
-      );
-
-      console.log("✅ User updated in DB");
-
-      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=success`);
-    } catch (error) {
-      console.error("🔥 Twitter callback error:", error);
-      const msg = error?.message || 'Callback failed';
-      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(msg))}`);
+    if (!code || !state || !redirectUri) {
+      const msg = 'Missing code, state or redirectUri';
+      console.log('❌ Missing parameters:', { code: !!code, state: !!state, redirectUri: !!redirectUri });
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
     }
+
+    // Check if state exists in codeVerifiers BEFORE verification
+    if (!twitterService.codeVerifiers.has(state)) {
+      console.log('❌ State not found in codeVerifiers map:', {
+        state,
+        availableStates: Array.from(twitterService.codeVerifiers.keys())
+      });
+      const msg = 'Session expired - please try connecting again';
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
+    }
+
+    // Verify state JWT
+    let decodedState;
+    try {
+      decodedState = jwt.verify(state, config.JWT_SECRET);
+      console.log("✅ Decoded state:", decodedState);
+    } catch (error) {
+      console.error("❌ Invalid state JWT:", error);
+      const msg = 'Invalid authentication state';
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
+    }} catch (error) {
+    console.error("🔥 Twitter callback error:", error);
+    const msg = error?.message || 'Callback failed';
+    return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(msg))}`);
   }
+}
 
 
 
@@ -298,6 +276,21 @@ async postTweet(req, res) {
       });
     }
   }
+// Add this temporary debug method
+async debugCallback(req, res) {
+  console.log("🔍 DEBUG - Callback reached:", {
+    query: req.query,
+    originalUrl: req.originalUrl,
+    method: req.method,
+    headers: req.headers
+  });
+  
+  res.json({ 
+    success: true, 
+    message: "Callback endpoint reached",
+    query: req.query 
+  });
+}
 }
 
 module.exports = new TwitterController();

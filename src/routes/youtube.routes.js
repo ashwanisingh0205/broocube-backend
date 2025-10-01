@@ -21,11 +21,6 @@ router.get('/callback-test', (req, res) => {
   res.json({ success: true, message: 'YouTube callback route is accessible', timestamp: new Date().toISOString() });
 });
 
-// Protected routes (require your app's JWT)
-router.use(authenticate);
-router.delete('/disconnect', youtubeController.disconnect);
-router.get('/channel', youtubeController.getChannelInfo);
-router.post('/upload-video', upload.single('video'), youtubeController.uploadVideo);
-router.get('/video/:videoId/analytics', youtubeController.getVideoAnalytics);
+// Remove duplicate protected route definitions to avoid conflicts
 
 module.exports = router;

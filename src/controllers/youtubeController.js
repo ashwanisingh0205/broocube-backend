@@ -239,74 +239,124 @@ class YouTubeController {
   }
 
   // Upload video to YouTube
-  async uploadVideo(req, res) {
-    try {
-      const { title, description, tags } = req.body;
-      const userId = req.user.id;
-      const user = await User.findById(userId);
+// Upload video to YouTube with improved error handling
+async uploadVideo(req, res) {
+  try {
+    const { title, description, tags } = req.body;
+    const userId = req.user.id;
+    const user = await User.findById(userId);
 
-      if (!user || !user.socialAccounts?.youtube?.accessToken) {
-        return res.status(400).json({
-          success: false,
-          error: 'YouTube account not connected'
-        });
-      }
+    console.log('🎬 YouTube upload request:', {
+      userId,
+      hasFile: !!req.file,
+      fileSize: req.file?.size,
+      title,
+      descriptionLength: description?.length
+    });
 
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          error: 'No video file provided'
-        });
-      }
-
-      // Check if token is expired and refresh if needed
-      let accessToken = user.socialAccounts.youtube.accessToken;
-      if (user.socialAccounts.youtube.expiresAt < new Date()) {
-        const refreshResult = await youtubeService.refreshToken(user.socialAccounts.youtube.refreshToken);
-        if (refreshResult.success) {
-          accessToken = refreshResult.access_token;
-          await User.findByIdAndUpdate(userId, {
-            $set: {
-              'socialAccounts.youtube.accessToken': refreshResult.access_token,
-              'socialAccounts.youtube.refreshToken': refreshResult.refresh_token,
-              'socialAccounts.youtube.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
-            }
-          });
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: 'Failed to refresh YouTube token'
-          });
-        }
-      }
-
-      const result = await youtubeService.uploadVideo(
-        accessToken,
-        req.file.buffer,
-        title,
-        description,
-        tags ? tags.split(',').map(tag => tag.trim()) : []
-      );
-
-      if (!result.success) {
-        return res.status(400).json({
-          success: false,
-          error: result.error
-        });
-      }
-
-      res.json({
-        success: true,
-        video: result
-      });
-    } catch (error) {
-      console.error('YouTube video upload error:', error);
-      res.status(500).json({
+    if (!user || !user.socialAccounts?.youtube?.accessToken) {
+      return res.status(400).json({
         success: false,
-        error: 'Failed to upload video to YouTube'
+        error: 'YouTube account not connected'
       });
     }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No video file provided'
+      });
+    }
+
+    // Validate file size
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    if (req.file.size > maxSize) {
+      return res.status(400).json({
+        success: false,
+        error: `Video file too large. Maximum size is ${maxSize / (1024 * 1024)}MB`
+      });
+    }
+
+    // Validate file type
+    const allowedTypes = ['video/mp4', 'video/mov', 'video/avi', 'video/webm'];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid file type. Supported formats: MP4, MOV, AVI, WEBM'
+      });
+    }
+
+    // Check if token is expired and refresh if needed
+    let accessToken = user.socialAccounts.youtube.accessToken;
+    if (user.socialAccounts.youtube.expiresAt < new Date()) {
+      const refreshResult = await youtubeService.refreshToken(user.socialAccounts.youtube.refreshToken);
+      if (refreshResult.success) {
+        accessToken = refreshResult.access_token;
+        await User.findByIdAndUpdate(userId, {
+          $set: {
+            'socialAccounts.youtube.accessToken': refreshResult.access_token,
+            'socialAccounts.youtube.refreshToken': refreshResult.refresh_token,
+            'socialAccounts.youtube.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
+          }
+        });
+        console.log('✅ YouTube token refreshed for upload');
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Failed to refresh YouTube token'
+        });
+      }
+    }
+
+    // Choose upload method based on file size
+    const tagsArray = tags ? tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+    
+    let result;
+    if (req.file.size > 10 * 1024 * 1024) { // 10MB
+      console.log('📦 Using resumable upload for large file');
+      result = await youtubeService.uploadVideo(
+        accessToken,
+        req.file.buffer,
+        title || 'Untitled Video',
+        description || '',
+        tagsArray
+      );
+    } else {
+      console.log('📦 Using simple upload for small file');
+      result = await youtubeService.uploadVideoSimple(
+        accessToken,
+        req.file.buffer,
+        title || 'Untitled Video',
+        description || '',
+        tagsArray
+      );
+    }
+
+    if (!result.success) {
+      console.error('❌ YouTube upload failed:', result.error);
+      return res.status(400).json({
+        success: false,
+        error: result.error,
+        details: result.raw
+      });
+    }
+
+    console.log('✅ YouTube upload successful:', result.video_id);
+    res.json({
+      success: true,
+      message: 'Video uploaded to YouTube successfully',
+      video: result
+    });
+
+  } catch (error) {
+    console.error('❌ YouTube video upload error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload video to YouTube',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
+}
 
   // Get video analytics
   async getVideoAnalytics(req, res) {

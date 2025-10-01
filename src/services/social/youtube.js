@@ -163,37 +163,170 @@ class YouTubeService {
   }
 
   // Upload video to YouTube
-  async uploadVideo(accessToken, videoData, title, description, tags = []) {
+  async uploadVideo(accessToken, videoBuffer, title, description, tags = [], onProgress = null) {
+    try {
+      console.log('🎬 Starting YouTube video upload...', {
+        title,
+        descriptionLength: description?.length,
+        tagsCount: tags?.length,
+        videoSize: videoBuffer?.length
+      });
+
+      // Step 1: Initialize resumable upload session
+      const sessionInitResponse = await axios.post(
+        `${this.uploadURL}?part=snippet,status&uploadType=resumable`,
+        {
+          snippet: {
+            title: title,
+            description: description,
+            tags: tags,
+            categoryId: '22' // People & Blogs
+          },
+          status: {
+            privacyStatus: 'private' // Start as private
+          }
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Length': videoBuffer.length,
+            'X-Upload-Content-Type': 'video/*'
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity
+        }
+      );
+
+      const uploadUrl = sessionInitResponse.headers.location;
+      if (!uploadUrl) {
+        throw new Error('No upload URL received from YouTube');
+      }
+
+      console.log('📤 Upload session created:', uploadUrl);
+
+      // Step 2: Upload the video data in chunks
+      const chunkSize = 256 * 1024; // 256KB chunks
+      const totalSize = videoBuffer.length;
+      let uploadedBytes = 0;
+
+      while (uploadedBytes < totalSize) {
+        const chunk = videoBuffer.slice(uploadedBytes, uploadedBytes + chunkSize);
+        const chunkStart = uploadedBytes;
+        const chunkEnd = Math.min(uploadedBytes + chunkSize - 1, totalSize - 1);
+
+        const contentRange = `bytes ${chunkStart}-${chunkEnd}/${totalSize}`;
+
+        try {
+          const uploadResponse = await axios.put(uploadUrl, chunk, {
+            headers: {
+              'Content-Range': contentRange,
+              'Content-Type': 'video/*',
+            },
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+            timeout: 30000, // 30 seconds per chunk
+            onUploadProgress: (progressEvent) => {
+              if (onProgress) {
+                const chunkProgress = (progressEvent.loaded / progressEvent.total) * 100;
+                const overallProgress = ((uploadedBytes + progressEvent.loaded) / totalSize) * 100;
+                onProgress(overallProgress);
+              }
+            }
+          });
+
+          uploadedBytes += chunk.length;
+
+          console.log(`📊 Upload progress: ${((uploadedBytes / totalSize) * 100).toFixed(1)}%`);
+
+          // If upload is complete
+          if (uploadResponse.status === 200 || uploadResponse.status === 201) {
+            console.log('✅ Video uploaded successfully:', uploadResponse.data);
+            return {
+              success: true,
+              video_id: uploadResponse.data.id,
+              title: uploadResponse.data.snippet.title,
+              description: uploadResponse.data.snippet.description,
+              publishedAt: uploadResponse.data.snippet.publishedAt,
+              raw: uploadResponse.data
+            };
+          }
+
+        } catch (chunkError) {
+          console.error('❌ Chunk upload failed:', chunkError.message);
+          
+          // Check if we should retry
+          if (chunkError.response?.status === 308) {
+            // Resume from where we left off - get the range from headers
+            const rangeHeader = chunkError.response.headers['range'];
+            if (rangeHeader) {
+              const lastByte = parseInt(rangeHeader.split('-')[1]);
+              uploadedBytes = lastByte + 1;
+              console.log(`🔄 Resuming upload from byte: ${uploadedBytes}`);
+              continue;
+            }
+          }
+          
+          throw chunkError;
+        }
+      }
+
+      throw new Error('Upload did not complete');
+
+    } catch (error) {
+      console.error('❌ YouTube video upload error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+
+      return {
+        success: false,
+        error: error.response?.data?.error?.message || 
+               error.message || 
+               'Failed to upload video to YouTube',
+        statusCode: error.response?.status,
+        raw: error.response?.data
+      };
+    }
+  }
+
+  // Simple upload for small files (< 10MB)
+  async uploadVideoSimple(accessToken, videoBuffer, title, description, tags = []) {
     try {
       const formData = new FormData();
-      formData.append('video', videoData, {
-        filename: 'video.mp4',
-        contentType: 'video/mp4',
-      });
+      
+      // Create blob from buffer
+      const videoBlob = new Blob([videoBuffer], { type: 'video/mp4' });
+      formData.append('video', videoBlob, 'video.mp4');
 
       const metadata = {
         snippet: {
           title: title,
           description: description,
           tags: tags,
-          categoryId: '22' // People & Blogs
+          categoryId: '22'
         },
         status: {
-          privacyStatus: 'private' // Start as private, user can change later
+          privacyStatus: 'private'
         }
       };
 
       formData.append('metadata', JSON.stringify(metadata));
 
-      const response = await axios.post(`${this.baseURL}/videos`, formData, {
-        params: {
-          part: 'snippet,status'
-        },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          ...formData.getHeaders(),
-        },
-      });
+      const response = await axios.post(
+        `${this.uploadURL}?part=snippet,status&uploadType=multipart`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            ...formData.getHeaders(),
+          },
+          maxBodyLength: 50 * 1024 * 1024, // 50MB
+          maxContentLength: 50 * 1024 * 1024,
+          timeout: 120000 // 2 minutes
+        }
+      );
 
       return {
         success: true,
@@ -202,16 +335,17 @@ class YouTubeService {
         description: response.data.snippet.description,
         publishedAt: response.data.snippet.publishedAt
       };
+
     } catch (error) {
-      const statusCode = error.response?.status;
-      console.error('YouTube video upload error:', error.response?.data || error.message);
+      console.error('YouTube simple upload error:', error.response?.data || error.message);
       return {
         success: false,
         error: error.response?.data?.error?.message || 'Failed to upload video',
-        statusCode,
+        statusCode: error.response?.status,
       };
     }
   }
+
 
   // Get video analytics
   async getVideoAnalytics(accessToken, videoId) {
