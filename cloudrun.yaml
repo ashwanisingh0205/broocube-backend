@@ -18,13 +18,97 @@ spec:
               value: "http://localhost:3000"
             - name: FRONTEND_URL
               value: "http://localhost:3000"
-            - name: JWT_SECRET
+            - name: JWT_EXPIRE
+              value: "7d"
+            - name: JWT_REFRESH_EXPIRE
+              value: "30d"
+            - name: EMAIL_HOST
+              value: "smtp.gmail.com"
+            - name: EMAIL_PORT
+              value: "587"
+            - name: EMAIL_USER
+              value: "bloocubetech@gmail.com"
+            - name: EMAIL_FROM
+              value: "noreply@bloocube.com"
+            - name: MAX_FILE_SIZE
+              value: "10MB"
+            - name: UPLOAD_PATH
+              value: "./uploads"
+            - name: RATE_LIMIT_WINDOW_MS
+              value: "900000"
+            - name: RATE_LIMIT_MAX_REQUESTS
+              value: "100"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FILE
+              value: "./logs/app.log"
+            - name: BCRYPT_ROUNDS
+              value: "12"
+            - name: SESSION_SECRET
+              value: "your_session_secret_here_change_this_in_production"
+            - name: AI_SERVICE_URL
+              value: "http://localhost:8000"
+            - name: AI_SERVICE_API_KEY
               value: ""
-            - name: JWT_REFRESH_SECRET
-              value: ""
+            - name: ANALYTICS_SYNC_INTERVAL
+              value: "3600000"
+            - name: CLEANUP_INTERVAL
+              value: "86400000"
+            # Secret Manager references
             - name: MONGODB_URI
-              value: ""
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-uri
+                  key: latest
             - name: REDIS_URL
-              value: ""
+              valueFrom:
+                secretKeyRef:
+                  name: redis-url
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: latest
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-refresh-secret
+                  key: latest
+            - name: EMAIL_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: email-pass
+                  key: latest
+            - name: TWITTER_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: twitter-client-id
+                  key: latest
+            - name: TWITTER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: twitter-client-secret
+                  key: latest
+            - name: LINKEDIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: linkedin-client-id
+                  key: latest
+            - name: LINKEDIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: linkedin-client-secret
+                  key: latest
+            - name: YOUTUBE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: youtube-client-id
+                  key: latest
+            - name: YOUTUBE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: youtube-client-secret
+                  key: latest
       containerConcurrency: 80
       timeoutSeconds: 300
