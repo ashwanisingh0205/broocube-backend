@@ -83,6 +83,20 @@ const userSchema = new mongoose.Schema({
     }
   }],
   socialAccounts: {
+    youtube: {
+      id: String,
+      title: String,
+      description: String,
+      customUrl: String,
+      thumbnails: Object,
+      subscriberCount: String,
+      videoCount: String,
+      viewCount: String,
+      accessToken: String,
+      refreshToken: String,
+      expiresAt: Date,
+      connectedAt: Date
+    },
     twitter: {
       id: String,
       username: String,

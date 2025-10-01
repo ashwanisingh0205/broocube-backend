@@ -29,86 +29,86 @@ class TwitterController {
     }
   }
 
-// Inside TwitterController.handleCallback
-async handleCallback(req, res) {
-  try {
-    const { code, state, redirectUri } = req.query;
-    const redirectToFrontend = config.FRONTEND_URL || 'http://localhost:3000';
-
-    console.log("📥 Callback query params:", { code, state, redirectUri });
-    console.log("📥 Request headers:", req.headers);
-    console.log("📥 Request method:", req.method);
-    console.log("📥 Full URL:", req.originalUrl);
-
-    if (!code || !state || !redirectUri) {
-      const msg = 'Missing code, state or redirectUri';
-      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
-    }
-
-    // Verify state
-    let decodedState;
+  // Handle Twitter OAuth callback
+  async handleCallback(req, res) {
     try {
-      decodedState = jwt.verify(state, config.JWT_SECRET);
-      console.log("✅ Decoded state:", decodedState);
+      const { code, state, redirectUri } = req.query;
+      const redirectToFrontend = config.FRONTEND_URL || 'http://localhost:3000';
+
+      console.log("📥 Callback query params:", { code, state, redirectUri });
+      console.log("📥 Request headers:", req.headers);
+      console.log("📥 Request method:", req.method);
+      console.log("📥 Full URL:", req.originalUrl);
+
+      if (!code || !state || !redirectUri) {
+        const msg = 'Missing code, state or redirectUri';
+        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
+      }
+
+      // Verify state
+      let decodedState;
+      try {
+        decodedState = jwt.verify(state, config.JWT_SECRET);
+        console.log("✅ Decoded state:", decodedState);
+      } catch (error) {
+        console.error("❌ Invalid state:", error);
+        const msg = 'Invalid state';
+        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
+      }
+
+      // Exchange code for token
+      console.log("🔄 Exchanging code for token with redirectUri:", redirectUri);
+      const tokenResult = await twitterService.exchangeCodeForToken(code, redirectUri, state);
+      console.log("🔑 Token result:", tokenResult);
+
+      if (!tokenResult.success) {
+        const detail = tokenResult.raw?.error_description || tokenResult.raw?.detail || tokenResult.error || 'Token exchange failed';
+        return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(detail))}`);
+      }
+
+      // Try to get profile, but don't fail the connection if it errors
+      let profileResult;
+      try {
+        profileResult = await twitterService.getUserProfile(tokenResult.access_token);
+        console.log("👤 Profile result:", profileResult);
+      } catch (e) {
+        console.log("👤 Profile fetch threw:", e);
+      }
+
+      const twitterProfile = profileResult?.success ? {
+        id: profileResult.user.id,
+        username: profileResult.user.username,
+        name: profileResult.user.name
+      } : undefined;
+
+      // Update DB (store tokens regardless; profile if available)
+      await User.findByIdAndUpdate(
+        decodedState.userId,
+        {
+          $set: {
+            'socialAccounts.twitter.accessToken': tokenResult.access_token,
+            'socialAccounts.twitter.refreshToken': tokenResult.refresh_token,
+            'socialAccounts.twitter.expiresAt': new Date(Date.now() + tokenResult.expires_in * 1000),
+            'socialAccounts.twitter.connectedAt': new Date(),
+            ...(twitterProfile && {
+              'socialAccounts.twitter.id': twitterProfile.id,
+              'socialAccounts.twitter.username': twitterProfile.username,
+              'socialAccounts.twitter.name': twitterProfile.name,
+            })
+          }
+        },
+        { upsert: true }
+      );
+
+      console.log("✅ User updated in DB");
+
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=success`);
     } catch (error) {
-      console.error("❌ Invalid state:", error);
-      const msg = 'Invalid state';
-      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
+      console.error("🔥 Twitter callback error:", error);
+      const msg = error?.message || 'Callback failed';
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(msg))}`);
     }
-
-    // Exchange code for token
-    console.log("🔄 Exchanging code for token with redirectUri:", redirectUri);
-    const tokenResult = await twitterService.exchangeCodeForToken(code, redirectUri, state);
-    console.log("🔑 Token result:", tokenResult);
-
-    if (!tokenResult.success) {
-      const detail = tokenResult.raw?.error_description || tokenResult.raw?.detail || tokenResult.error || 'Token exchange failed';
-      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(detail))}`);
-    }
-
-    // Try to get profile, but don't fail the connection if it errors
-    let profileResult;
-    try {
-      profileResult = await twitterService.getUserProfile(tokenResult.access_token);
-      console.log("👤 Profile result:", profileResult);
-    } catch (e) {
-      console.log("👤 Profile fetch threw:", e);
-    }
-
-    const twitterProfile = profileResult?.success ? {
-      id: profileResult.user.id,
-      username: profileResult.user.username,
-      name: profileResult.user.name
-    } : undefined;
-
-    // Update DB (store tokens regardless; profile if available)
-    await User.findByIdAndUpdate(
-      decodedState.userId,
-      {
-        $set: {
-          'socialAccounts.twitter.accessToken': tokenResult.access_token,
-          'socialAccounts.twitter.refreshToken': tokenResult.refresh_token,
-          'socialAccounts.twitter.expiresAt': new Date(Date.now() + tokenResult.expires_in * 1000),
-          'socialAccounts.twitter.connectedAt': new Date(),
-          ...(twitterProfile && {
-            'socialAccounts.twitter.id': twitterProfile.id,
-            'socialAccounts.twitter.username': twitterProfile.username,
-            'socialAccounts.twitter.name': twitterProfile.name,
-          })
-        }
-      },
-      { upsert: true }
-    );
-
-    console.log("✅ User updated in DB");
-
-    return res.redirect(`${redirectToFrontend}/creator/settings?twitter=success`);
-  } catch (error) {
-    console.error("🔥 Twitter callback error:", error);
-    const msg = error?.message || 'Callback failed';
-    return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(msg))}`);
   }
-}
 
 
 

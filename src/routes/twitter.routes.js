@@ -5,9 +5,9 @@ const twitterController = require('../controllers/twitterController');
 const { authenticate } = require('../middlewares/auth');
 const upload = require('../middlewares/upload');
 
-// Auth URL: allow GET public (frontend uses it) and keep POST protected if needed
+// Auth URL: require authentication for both GET and POST to bind user in state
 router.post('/auth-url', authenticate, twitterController.generateAuthURL);
-router.get('/auth-url', twitterController.generateAuthURL);
+router.get('/auth-url', authenticate, twitterController.generateAuthURL);
 router.get('/callback', twitterController.handleCallback);
 
 // Test route to verify callback is accessible
