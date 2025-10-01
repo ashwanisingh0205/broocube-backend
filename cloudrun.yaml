@@ -1,0 +1,30 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: bloocube-backend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    spec:
+      containers:
+        - image: IMAGE_URL
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "5000"
+            - name: CORS_ORIGIN
+              value: "http://localhost:3000"
+            - name: FRONTEND_URL
+              value: "http://localhost:3000"
+            - name: JWT_SECRET
+              value: ""
+            - name: JWT_REFRESH_SECRET
+              value: ""
+            - name: MONGODB_URI
+              value: ""
+            - name: REDIS_URL
+              value: ""
+      containerConcurrency: 80
+      timeoutSeconds: 300
