@@ -7,12 +7,18 @@ const config = require('../config/env');
 class TwitterController {
   // Generate Twitter OAuth URL
   async generateAuthURL(req, res) {
-    const { redirectUri } = req.body;
-    const state = jwt.sign({ userId: req.userId || req.user._id }, config.JWT_SECRET, { expiresIn: '30m' });
-  
-    const authURL = twitterService.generateAuthURL(redirectUri, state);
-  
-    res.json({ success: true, authURL, state, redirectUri }); // include redirectUri
+    try {
+      const redirectUri = (req.body && req.body.redirectUri) || req.query.redirectUri || config.TWITTER_REDIRECT_URI || '';
+      const userId = (req.userId) || (req.user && req.user._id) || 'guest';
+      const state = jwt.sign({ userId }, config.JWT_SECRET, { expiresIn: '30m' });
+
+      const authURL = twitterService.generateAuthURL(redirectUri, state);
+
+      return res.json({ success: true, authURL, state, redirectUri });
+    } catch (err) {
+      console.error('generateAuthURL error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Failed to generate Twitter auth URL' });
+    }
   }
 
 // Inside TwitterController.handleCallback

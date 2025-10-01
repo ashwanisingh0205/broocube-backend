@@ -26,7 +26,18 @@ const app = express();
 
 // Middlewares
 app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
+// Support multiple allowed origins via comma-separated CORS_ORIGIN
+const allowedOrigins = (config.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(mongoSanitize());
