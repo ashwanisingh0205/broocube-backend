@@ -8,16 +8,24 @@ class TwitterController {
   // Generate Twitter OAuth URL
   async generateAuthURL(req, res) {
     try {
-      const redirectUri = (req.body && req.body.redirectUri) || req.query.redirectUri || config.TWITTER_REDIRECT_URI || '';
-      const userId = (req.userId) || (req.user && req.user._id) || 'guest';
+      console.log('🔑 Twitter generateAuthURL called:', {
+        hasUser: !!req.user,
+        userId: req.userId || req.user?._id || 'guest',
+        redirectUri: req.body?.redirectUri || req.query?.redirectUri || config.TWITTER_REDIRECT_URI,
+        method: req.method
+      });
+
+      const redirectUri = (req.body && req.body.redirectUri) || req.query?.redirectUri || config.TWITTER_REDIRECT_URI || '';
+      const userId = req.userId || req.user?._id || 'guest';
       const state = jwt.sign({ userId }, config.JWT_SECRET, { expiresIn: '30m' });
 
       const authURL = twitterService.generateAuthURL(redirectUri, state);
 
+      console.log('✅ Twitter auth URL generated:', { hasAuthURL: !!authURL, state: state.substring(0, 20) + '...' });
       return res.json({ success: true, authURL, state, redirectUri });
-    } catch (err) {
-      console.error('generateAuthURL error:', err);
-      return res.status(500).json({ success: false, error: err.message || 'Failed to generate Twitter auth URL' });
+    } catch (error) {
+      console.error('❌ Twitter generateAuthURL error:', error);
+      return res.status(500).json({ success: false, error: error.message || 'Failed to generate Twitter auth URL' });
     }
   }
 
@@ -25,7 +33,7 @@ class TwitterController {
 async handleCallback(req, res) {
   try {
     const { code, state, redirectUri } = req.query;
-    const redirectToFrontend = 'http://localhost:3000/creator/settings';
+    const redirectToFrontend = config.FRONTEND_URL || 'http://localhost:3000';
 
     console.log("📥 Callback query params:", { code, state, redirectUri });
     console.log("📥 Request headers:", req.headers);
@@ -34,7 +42,7 @@ async handleCallback(req, res) {
 
     if (!code || !state || !redirectUri) {
       const msg = 'Missing code, state or redirectUri';
-      return res.redirect(`${redirectToFrontend}?twitter=error&message=${encodeURIComponent(msg)}`);
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
     }
 
     // Verify state
@@ -45,7 +53,7 @@ async handleCallback(req, res) {
     } catch (error) {
       console.error("❌ Invalid state:", error);
       const msg = 'Invalid state';
-      return res.redirect(`${redirectToFrontend}?twitter=error&message=${encodeURIComponent(msg)}`);
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(msg)}`);
     }
 
     // Exchange code for token
@@ -55,7 +63,7 @@ async handleCallback(req, res) {
 
     if (!tokenResult.success) {
       const detail = tokenResult.raw?.error_description || tokenResult.raw?.detail || tokenResult.error || 'Token exchange failed';
-      return res.redirect(`${redirectToFrontend}?twitter=error&message=${encodeURIComponent(String(detail))}`);
+      return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(detail))}`);
     }
 
     // Try to get profile, but don't fail the connection if it errors
@@ -94,11 +102,11 @@ async handleCallback(req, res) {
 
     console.log("✅ User updated in DB");
 
-    return res.redirect(`${redirectToFrontend}?twitter=success`);
+    return res.redirect(`${redirectToFrontend}/creator/settings?twitter=success`);
   } catch (error) {
     console.error("🔥 Twitter callback error:", error);
     const msg = error?.message || 'Callback failed';
-    return res.redirect(`${redirectToFrontend}?twitter=error&message=${encodeURIComponent(String(msg))}`);
+    return res.redirect(`${redirectToFrontend}/creator/settings?twitter=error&message=${encodeURIComponent(String(msg))}`);
   }
 }
 
@@ -180,13 +188,24 @@ async postTweet(req, res) {
       }
     }
 
-    const result = await twitterService.postTweet(accessToken, content, mediaIds);
-    
+    let result = await twitterService.postTweet(accessToken, content, mediaIds);
+    if (!result.success && (result.statusCode === 401 || result.statusCode === 403)) {
+      // attempt refresh using stored refreshToken and retry once
+      const refresh = await twitterService.refreshToken(user.socialAccounts.twitter.refreshToken);
+      if (refresh.success) {
+        accessToken = refresh.access_token;
+        await User.findByIdAndUpdate(userId, {
+          $set: {
+            'socialAccounts.twitter.accessToken': refresh.access_token,
+            'socialAccounts.twitter.refreshToken': refresh.refresh_token || user.socialAccounts.twitter.refreshToken,
+            'socialAccounts.twitter.expiresAt': new Date(Date.now() + (refresh.expires_in || 3600) * 1000)
+          }
+        });
+        result = await twitterService.postTweet(accessToken, content, mediaIds);
+      }
+    }
     if (!result.success) {
-      return res.status(400).json({
-        success: false,
-        error: result.error
-      });
+      return res.status(400).json({ success: false, error: result.error });
     }
 
     res.json({
@@ -249,17 +268,22 @@ async postTweet(req, res) {
         });
       }
 
-      const result = await twitterService.uploadMedia(
-        user.socialAccounts.twitter.accessToken,
-        req.file.buffer,
-        req.file.mimetype
-      );
-
+      let result = await twitterService.uploadMedia(user.socialAccounts.twitter.accessToken, req.file.buffer, req.file.mimetype);
+      if (!result.success && (result.statusCode === 401 || result.statusCode === 403)) {
+        const refresh = await twitterService.refreshToken(user.socialAccounts.twitter.refreshToken);
+        if (refresh.success) {
+          await User.findByIdAndUpdate(userId, {
+            $set: {
+              'socialAccounts.twitter.accessToken': refresh.access_token,
+              'socialAccounts.twitter.refreshToken': refresh.refresh_token || user.socialAccounts.twitter.refreshToken,
+              'socialAccounts.twitter.expiresAt': new Date(Date.now() + (refresh.expires_in || 3600) * 1000)
+            }
+          });
+          result = await twitterService.uploadMedia(refresh.access_token, req.file.buffer, req.file.mimetype);
+        }
+      }
       if (!result.success) {
-        return res.status(400).json({
-          success: false,
-          error: result.error
-        });
+        return res.status(400).json({ success: false, error: result.error });
       }
 
       res.json({

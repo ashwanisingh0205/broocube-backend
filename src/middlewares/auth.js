@@ -11,7 +11,12 @@ const { HTTP_STATUS, ERROR_MESSAGES } = require('../utils/constants');
  */
 const authenticate = async (req, res, next) => {
   try {
-    console.log("🔑 Auth header received:", req.headers.authorization, "on", req.originalUrl);
+    console.log("🔑 Auth header received:", {
+      hasAuthHeader: !!req.headers.authorization,
+      authHeader: req.headers.authorization ? 'Bearer ***' : 'missing',
+      url: req.originalUrl,
+      method: req.method
+    });
 
     const authHeader = req.headers.authorization;
     

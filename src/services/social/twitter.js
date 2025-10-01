@@ -69,11 +69,13 @@ class TwitterService {
         token_type: response.data.token_type,
       };
     } catch (error) {
+      const statusCode = error.response?.status;
       const detail = error.response?.data || error.message;
       console.error('Twitter token exchange error:', detail);
       return {
         success: false,
         error: detail?.error_description || detail?.error || 'Token exchange failed',
+        statusCode,
         raw: detail,
       };
     }
@@ -104,13 +106,12 @@ class TwitterService {
         expires_in: response.data.expires_in,
       };
     } catch (error) {
-      console.error(
-        'Twitter token refresh error:',
-        error.response?.data || error.message
-      );
+      const statusCode = error.response?.status;
+      console.error('Twitter token refresh error:', error.response?.data || error.message);
       return {
         success: false,
         error: error.response?.data?.error || 'Token refresh failed',
+        statusCode,
       };
     }
   }
@@ -142,13 +143,12 @@ class TwitterService {
         created_at: response.data.data.created_at,
       };
     } catch (error) {
-      console.error(
-        'Twitter post error:',
-        error.response?.data || error.message
-      );
+      const statusCode = error.response?.status;
+      console.error('Twitter post error:', error.response?.data || error.message);
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to post tweet',
+        statusCode,
       };
     }
   }
@@ -169,13 +169,12 @@ class TwitterService {
         user: response.data.data,
       };
     } catch (error) {
-      console.error(
-        'Twitter profile error:',
-        error.response?.data || error.message
-      );
+      const statusCode = error.response?.status;
+      console.error('Twitter profile error:', error.response?.data || error.message);
       return {
         success: false,
         error: error.response?.data?.detail || error.response?.data?.error_description || 'Failed to get user profile',
+        statusCode,
         raw: error.response?.data || null,
       };
     }
@@ -215,15 +214,14 @@ class TwitterService {
         media_id: response.data.media_id_string,
       };
     } catch (error) {
-      console.error(
-        'Twitter media upload error:',
-        error.response?.data || error.message
-      );
+      const statusCode = error.response?.status;
+      console.error('Twitter media upload error:', error.response?.data || error.message);
       return {
         success: false,
         error:
           error.response?.data?.errors?.[0]?.message ||
           'Failed to upload media',
+        statusCode,
       };
     }
   }
@@ -246,13 +244,12 @@ class TwitterService {
         created_at: response.data.data.created_at,
       };
     } catch (error) {
-      console.error(
-        'Twitter analytics error:',
-        error.response?.data || error.message
-      );
+      const statusCode = error.response?.status;
+      console.error('Twitter analytics error:', error.response?.data || error.message);
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to get tweet analytics',
+        statusCode,
       };
     }
   }

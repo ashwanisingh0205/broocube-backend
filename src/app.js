@@ -21,6 +21,7 @@ const aiRoutes = require("./routes/ai.routes");
 const twitterRoutes = require("./routes/twitter.routes");
 const googleRoutes = require("./routes/google.routes");
 const linkedinRoutes = require("./routes/linkedin.routes");
+const youtubeRoutes = require("./routes/youtube.routes");
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/twitter", twitterRoutes);
 app.use("/api/google", googleRoutes);
 app.use("/api/linkedin", linkedinRoutes);
+app.use("/api/youtube", youtubeRoutes);
 const healthRoutes = require("./routes/health.routes");
 app.use("/api", healthRoutes);
 
