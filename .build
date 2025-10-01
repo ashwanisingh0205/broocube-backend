@@ -1,0 +1,15 @@
+# Build/deploy configuration for backend
+PROJECT_ID=
+REGION=us-central1
+SERVICE=bloocube-backend
+IMAGE=gcr.io/$PROJECT_ID/$SERVICE:$(date +%Y%m%d-%H%M%S)
+PORT=5000
+# Comma-separated CORS origins for backend
+CORS_ORIGIN=http://localhost:3000
+# FRONTEND URL used for redirects
+FRONTEND_URL=http://localhost:3000
+# Required secrets to set on Cloud Run (set via Console or gcloud)
+# JWT_SECRET=
+# JWT_REFRESH_SECRET=
+# MONGODB_URI=
+# REDIS_URL=
