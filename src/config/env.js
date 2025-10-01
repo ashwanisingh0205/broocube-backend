@@ -61,6 +61,7 @@ const config = {
   
   // CORS Configuration
   CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
   
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

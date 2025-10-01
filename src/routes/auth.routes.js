@@ -1,6 +1,6 @@
 // src/routes/auth.routes.js
 const router = require('express').Router();
-const { authenticate, validatePasswordResetToken } = require('../middlewares/auth');
+const { authenticate, validatePasswordResetToken, refreshToken } = require('../middlewares/auth');
 const { validateWithJoi, userValidation, validationRules, validateRequest } = require('../utils/validator');
 const { authLimiter, passwordResetLimiter } = require('../middlewares/rateLimiter');
 const ctrl = require('../controllers/authController');
@@ -16,8 +16,23 @@ router.post('/request-password-reset', passwordResetLimiter, ctrl.requestPasswor
 router.post('/reset-password/:token', validatePasswordResetToken, ctrl.resetPassword);
 
 router.post('/logout', authenticate, ctrl.logout);
+// Token refresh
+router.post('/refresh', refreshToken);
 
 router.get('/verify/:token', ctrl.verifyEmail);
 router.post('/resend-verification', authenticate, ctrl.resendVerification);
+
+// Test endpoint to verify authentication
+router.get('/test', authenticate, (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'Authentication working',
+    user: {
+      id: req.user._id,
+      email: req.user.email,
+      role: req.user.role
+    }
+  });
+});
 
 module.exports = router;
