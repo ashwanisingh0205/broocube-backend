@@ -13,30 +13,30 @@ class GoogleController {
   }
 
   async handleCallback(req, res) {
-    const redirectToFrontend = 'http://localhost:3000/login';
+    const redirectBase = (config.FRONTEND_URL || 'http://localhost:3000');
     try {
       const { code, state, redirectUri } = req.query;
       if (!code || !state || !redirectUri) {
-        return res.redirect(`${redirectToFrontend}?google=error&message=Missing+code+state+or+redirectUri`);
+        return res.redirect(`${redirectBase}/login?google=error&message=Missing+code+state+or+redirectUri`);
       }
 
       let decoded;
       try {
         decoded = jwt.verify(state, config.JWT_SECRET);
       } catch (e) {
-        return res.redirect(`${redirectToFrontend}?google=error&message=Invalid+state`);
+        return res.redirect(`${redirectBase}/login?google=error&message=Invalid+state`);
       }
 
       const tokenResult = await googleService.exchangeCodeForToken(code, redirectUri);
       if (!tokenResult.success) {
         const detail = tokenResult.raw?.error_description || tokenResult.error;
-        return res.redirect(`${redirectToFrontend}?google=error&message=${encodeURIComponent(detail || 'Token+exchange+failed')}`);
+        return res.redirect(`${redirectBase}/login?google=error&message=${encodeURIComponent(detail || 'Token+exchange+failed')}`);
       }
 
       const userInfo = await googleService.getUserInfo(tokenResult.access_token);
       if (!userInfo.success) {
         const detail = userInfo.raw?.error_description || userInfo.error;
-        return res.redirect(`${redirectToFrontend}?google=error&message=${encodeURIComponent(detail || 'Userinfo+failed')}`);
+        return res.redirect(`${redirectBase}/login?google=error&message=${encodeURIComponent(detail || 'Userinfo+failed')}`);
       }
 
       // Find or create user
@@ -56,10 +56,24 @@ class GoogleController {
       const jwtManager = require('../utils/jwt');
       const tokenPair = jwtManager.generateTokenPair({ id: user._id, email: user.email, role: user.role });
 
-      // Redirect back to frontend login page with tokens in query (frontend should store securely)
-      return res.redirect(`${redirectToFrontend}?google=success&accessToken=${encodeURIComponent(tokenPair.accessToken)}&refreshToken=${encodeURIComponent(tokenPair.refreshToken)}`);
+      // Set tokens as HTTP-only cookies, then redirect to dashboard
+      const isProd = process.env.NODE_ENV === 'production';
+      res.cookie('accessToken', tokenPair.accessToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        maxAge: 1000 * 60 * 60, // 1 hour
+      });
+      res.cookie('refreshToken', tokenPair.refreshToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+      });
+
+      return res.redirect(`${redirectBase}/creator/dashboard`);
     } catch (error) {
-      return res.redirect(`${redirectToFrontend}?google=error&message=${encodeURIComponent(error.message || 'Callback+failed')}`);
+      return res.redirect(`${redirectBase}/login?google=error&message=${encodeURIComponent(error.message || 'Callback+failed')}`);
     }
   }
 }
