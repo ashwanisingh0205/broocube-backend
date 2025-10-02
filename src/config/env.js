@@ -47,9 +47,9 @@ const config = {
   // Twitter OAuth
   TWITTER_SCOPES: process.env.TWITTER_SCOPES || 'tweet.read users.read offline.access',
   
-  // AI Service Configuration
-  AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
-  AI_SERVICE_API_KEY: process.env.AI_SERVICE_API_KEY,
+  // AI Service Configuration (Updated for stateless flow)
+  AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8001',
+  AI_SERVICE_API_KEY: process.env.AI_SERVICE_API_KEY || 'default-dev-key',
   
   // File Upload Configuration
   MAX_FILE_SIZE: process.env.MAX_FILE_SIZE || '10MB',

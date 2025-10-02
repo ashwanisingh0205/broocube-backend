@@ -67,6 +67,8 @@ app.use("/api/linkedin", linkedinRoutes);
 app.use("/api/youtube", youtubeRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/competitors", competitorRoutes);
+const aiProviderRoutes = require('./routes/aiProvider.routes');
+app.use("/api/admin/ai-providers", aiProviderRoutes);
 const healthRoutes = require("./routes/health.routes");
 app.use("/api", healthRoutes);
 
