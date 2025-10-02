@@ -262,17 +262,66 @@ const publishPost = asyncHandler(async (req, res) => {
           throw new Error('Video file is required for YouTube posts');
         }
 
-        // Note: This would need actual file handling in a real implementation
-        publishResult = await youtubeService.uploadVideo(
-          post.media[0].url, // This would be the actual file in practice
-          post.youtube_content.title,
-          post.youtube_content.description || post.content.caption,
-          post.youtube_content.tags || []
-        );
+        // For YouTube, we need to read the actual file from the stored path
+        const fs = require('fs');
+        const path = require('path');
         
-        if (publishResult.success) {
-          post.publishing.platform_post_id = publishResult.data.id;
-          post.publishing.platform_url = `https://www.youtube.com/watch?v=${publishResult.data.id}`;
+        try {
+          // Get the file path from media
+          const mediaPath = post.media[0].url;
+          
+          // Check if file exists
+          if (!fs.existsSync(mediaPath)) {
+            throw new Error('Video file not found on server');
+          }
+          
+          // Read file as buffer
+          const videoBuffer = fs.readFileSync(mediaPath);
+          
+          // Check if token is expired and refresh if needed
+          let accessToken = user.socialAccounts.youtube.accessToken;
+          if (user.socialAccounts.youtube.expiresAt < new Date()) {
+            const youtubeService = require('../services/social/youtube');
+            const refreshResult = await youtubeService.refreshToken(user.socialAccounts.youtube.refreshToken);
+            if (refreshResult.success) {
+              accessToken = refreshResult.access_token;
+              // Update user with new token
+              await User.findByIdAndUpdate(req.userId, {
+                $set: {
+                  'socialAccounts.youtube.accessToken': refreshResult.access_token,
+                  'socialAccounts.youtube.refreshToken': refreshResult.refresh_token,
+                  'socialAccounts.youtube.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
+                }
+              });
+            } else {
+              throw new Error('Failed to refresh YouTube token');
+            }
+          }
+
+          // Upload video to YouTube
+          const youtubeService = require('../services/social/youtube');
+          publishResult = await youtubeService.uploadVideo(
+            accessToken,
+            videoBuffer,
+            post.youtube_content.title,
+            post.youtube_content.description || post.content.caption,
+            post.youtube_content.tags || []
+          );
+          
+          if (publishResult.success) {
+            post.publishing.platform_post_id = publishResult.data.id;
+            post.publishing.platform_url = `https://www.youtube.com/watch?v=${publishResult.data.id}`;
+          }
+          
+          // Clean up the local file after successful upload
+          try {
+            fs.unlinkSync(mediaPath);
+          } catch (cleanupError) {
+            console.warn('Failed to cleanup video file:', cleanupError.message);
+          }
+          
+        } catch (fileError) {
+          throw new Error(`YouTube upload failed: ${fileError.message}`);
         }
         break;
 

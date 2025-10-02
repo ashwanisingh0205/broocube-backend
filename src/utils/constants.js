@@ -41,8 +41,7 @@ const PLATFORMS = {
   YOUTUBE: 'youtube',
   TWITTER: 'twitter',
   LINKEDIN: 'linkedin',
-  FACEBOOK: 'facebook',
-  TIKTOK: 'tiktok'
+  FACEBOOK: 'facebook'
 };
 
 // Content types

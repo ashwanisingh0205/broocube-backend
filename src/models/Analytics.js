@@ -15,7 +15,7 @@ const analyticsSchema = new mongoose.Schema({
   platform: {
     type: String,
     required: [true, 'Platform is required'],
-    enum: ['youtube', 'instagram', 'twitter', 'linkedin', 'facebook', 'tiktok']
+    enum: ['youtube', 'instagram', 'twitter', 'linkedin', 'facebook']
   },
   post_id: {
     type: String,

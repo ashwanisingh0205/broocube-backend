@@ -23,7 +23,7 @@ const postSchema = new mongoose.Schema({
   platform: {
     type: String,
     required: [true, 'Platform is required'],
-    enum: ['instagram', 'youtube', 'twitter', 'linkedin', 'facebook', 'tiktok']
+    enum: ['instagram', 'youtube', 'twitter', 'linkedin', 'facebook']
   },
   post_type: {
     type: String,
@@ -173,24 +173,6 @@ const postSchema = new mongoose.Schema({
     }
   },
 
-  tiktok_content: {
-    effects: [String],
-    sounds: [{
-      sound_id: String,
-      sound_name: String,
-      artist: String
-    }],
-    duet_settings: {
-      allow_duet: {
-        type: Boolean,
-        default: true
-      },
-      allow_stitch: {
-        type: Boolean,
-        default: true
-      }
-    }
-  },
 
   // Media files
   media: [{

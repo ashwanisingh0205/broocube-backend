@@ -194,7 +194,7 @@ const analyticsValidation = {
   create: Joi.object({
     user_id: commonSchemas.objectId,
     campaign_id: commonSchemas.objectId.optional(),
-    platform: Joi.string().valid('youtube', 'instagram', 'twitter', 'linkedin', 'facebook', 'tiktok').required(),
+    platform: Joi.string().valid('youtube', 'instagram', 'twitter', 'linkedin', 'facebook').required(),
     post_id: Joi.string().required(),
     post_type: Joi.string().valid('post', 'story', 'reel', 'video', 'live', 'carousel', 'poll').required(),
     content: Joi.object({
