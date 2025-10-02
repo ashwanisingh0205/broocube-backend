@@ -4,8 +4,8 @@ const User = require('../models/User');
 const logger = require('../utils/logger');
 const { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES, PAGINATION } = require('../utils/constants');
 const { asyncHandler } = require('../middlewares/errorHandler');
-const { twitterService } = require('../services/twitterService');
-const { youtubeService } = require('../services/youtubeService');
+const twitterService = require('../services/social/twitter');
+const youtubeService = require('../services/social/youtube');
 
 /**
  * Create a new post
@@ -241,11 +241,26 @@ const publishPost = asyncHandler(async (req, res) => {
           throw new Error('Twitter account not connected');
         }
         
+        // Check if token is expired and refresh if needed
+        let accessToken = user.socialAccounts.twitter.accessToken;
+        if (user.socialAccounts.twitter.expiresAt < new Date()) {
+          const refreshResult = await twitterService.refreshToken(user.socialAccounts.twitter.refreshToken);
+          if (refreshResult.success) {
+            accessToken = refreshResult.access_token;
+            await User.findByIdAndUpdate(req.userId, {
+              $set: {
+                'socialAccounts.twitter.accessToken': refreshResult.access_token,
+                'socialAccounts.twitter.refreshToken': refreshResult.refresh_token,
+                'socialAccounts.twitter.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
+              }
+            });
+          } else {
+            throw new Error('Failed to refresh Twitter token');
+          }
+        }
+
         const tweetContent = post.content.caption || '';
-        publishResult = await twitterService.postTweet(
-          user.socialAccounts.twitter.accessToken,
-          tweetContent
-        );
+        publishResult = await twitterService.postTweet(accessToken, tweetContent);
         
         if (publishResult.success) {
           post.publishing.platform_post_id = publishResult.data.id;
@@ -281,7 +296,6 @@ const publishPost = asyncHandler(async (req, res) => {
           // Check if token is expired and refresh if needed
           let accessToken = user.socialAccounts.youtube.accessToken;
           if (user.socialAccounts.youtube.expiresAt < new Date()) {
-            const youtubeService = require('../services/social/youtube');
             const refreshResult = await youtubeService.refreshToken(user.socialAccounts.youtube.refreshToken);
             if (refreshResult.success) {
               accessToken = refreshResult.access_token;
@@ -299,7 +313,6 @@ const publishPost = asyncHandler(async (req, res) => {
           }
 
           // Upload video to YouTube
-          const youtubeService = require('../services/social/youtube');
           publishResult = await youtubeService.uploadVideo(
             accessToken,
             videoBuffer,
