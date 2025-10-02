@@ -1,431 +1,241 @@
-// src/models/Post.js
 const mongoose = require('mongoose');
 
-const postSchema = new mongoose.Schema({
-  user_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: [true, 'User ID is required'],
-    validate: {
-      validator: async function(userId) {
-        const User = mongoose.model('User');
-        const user = await User.findById(userId);
-        return user && user.role === 'creator';
-      },
-      message: 'User ID must reference a valid creator user'
-    }
-  },
-  campaign_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Campaign',
-    default: null
-  },
+const PostSchema = new mongoose.Schema({
+  // Basic post information
   platform: {
     type: String,
-    required: [true, 'Platform is required'],
-    enum: ['instagram', 'youtube', 'twitter', 'linkedin', 'facebook']
+    required: true,
+    enum: ['twitter', 'youtube', 'instagram', 'linkedin', 'facebook'],
+    trim: true
   },
   post_type: {
     type: String,
-    enum: ['post', 'story', 'reel', 'video', 'live', 'carousel', 'poll', 'short'],
-    required: true
+    required: true,
+    trim: true
   },
   status: {
     type: String,
-    enum: ['draft', 'scheduled', 'published', 'failed', 'cancelled'],
+    enum: ['draft', 'scheduled', 'published', 'failed'],
     default: 'draft'
   },
   
-  // Common content fields
+  // Author reference
+  author: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+
+  // Main content (common across platforms)
   content: {
     caption: {
       type: String,
-      maxlength: [10000, 'Caption cannot exceed 10000 characters']
+      maxlength: 10000
     },
-    hashtags: [String],
-    mentions: [String]
-  },
-
-  // Platform-specific content
-  instagram_content: {
-    alt_text: String,
-    location: {
-      name: String,
-      lat: Number,
-      lng: Number
-    },
-    product_tags: [{
-      product_id: String,
-      x: Number,
-      y: Number
+    hashtags: [{
+      type: String,
+      trim: true
     }],
-    story_stickers: [{
-      type: {
-        type: String,
-        enum: ['poll', 'question', 'quiz', 'countdown', 'slider']
-      },
-      text: String,
-      options: [String]
-    }],
-    carousel_children: [{
-      media_type: {
-        type: String,
-        enum: ['image', 'video']
-      },
-      media_url: String,
-      alt_text: String
+    mentions: [{
+      type: String,
+      trim: true
     }]
   },
 
-  youtube_content: {
-    title: {
-      type: String,
-      maxlength: [100, 'YouTube title cannot exceed 100 characters']
-    },
-    description: {
-      type: String,
-      maxlength: [5000, 'YouTube description cannot exceed 5000 characters']
-    },
-    tags: [String],
-    category_id: String,
-    privacy_status: {
-      type: String,
-      enum: ['public', 'private', 'unlisted'],
-      default: 'public'
-    },
-    thumbnail_url: String,
-    playlist_id: String,
-    shorts_settings: {
-      is_short: {
-        type: Boolean,
-        default: false
-      },
-      short_description: String
-    }
-  },
-
-  twitter_content: {
-    thread: [{
-      text: {
+  // Platform-specific content
+  platform_content: {
+    // Twitter specific
+    twitter: {
+      thread: [{
         type: String,
-        maxlength: [280, 'Tweet cannot exceed 280 characters']
-      },
-      order: Number
-    }],
-    reply_settings: {
-      type: String,
-      enum: ['everyone', 'following', 'mentioned'],
-      default: 'everyone'
-    },
-    poll: {
-      question: String,
-      options: [{
-        type: String,
-        maxlength: [25, 'Poll option cannot exceed 25 characters']
+        maxlength: 280
       }],
-      duration_minutes: {
-        type: Number,
-        min: 5,
-        max: 10080,
-        default: 1440
+      reply_settings: {
+        type: String,
+        enum: ['everyone', 'following', 'mentioned'],
+        default: 'everyone'
+      },
+      poll: {
+        options: [{
+          type: String,
+          maxlength: 25
+        }],
+        duration_minutes: {
+          type: Number,
+          min: 5,
+          max: 10080 // 7 days
+        }
+      }
+    },
+    
+    // YouTube specific
+    youtube: {
+      title: {
+        type: String,
+        maxlength: 100,
+        trim: true
+      },
+      description: {
+        type: String,
+        maxlength: 5000
+      },
+      tags: [{
+        type: String,
+        trim: true
+      }],
+      category: {
+        type: String,
+        enum: ['Entertainment', 'Education', 'Gaming', 'Music', 'News', 'Sports', 'Technology']
+      },
+      privacy_status: {
+        type: String,
+        enum: ['public', 'unlisted', 'private'],
+        default: 'public'
+      }
+    },
+    
+    // Instagram specific
+    instagram: {
+      alt_text: String,
+      location: {
+        name: String
+      }
+    },
+    
+    // LinkedIn specific
+    linkedin: {
+      visibility: {
+        type: String,
+        enum: ['public', 'connections'],
+        default: 'public'
+      },
+      article: {
+        title: String,
+        body: String
+      }
+    },
+    
+    // Facebook specific
+    facebook: {
+      link_preview: {
+        url: String
       }
     }
   },
-
-  linkedin_content: {
-    article: {
-      title: String,
-      body: String,
-      summary: String
-    },
-    visibility: {
-      type: String,
-      enum: ['public', 'connections'],
-      default: 'public'
-    },
-    target_audience: {
-      geo_locations: [String],
-      industries: [String],
-      job_functions: [String]
-    }
-  },
-
-  facebook_content: {
-    link_preview: {
-      url: String,
-      title: String,
-      description: String,
-      image_url: String
-    },
-    event_details: {
-      name: String,
-      start_time: Date,
-      end_time: Date,
-      location: String,
-      description: String
-    },
-    targeting: {
-      age_min: Number,
-      age_max: Number,
-      genders: [String],
-      interests: [String],
-      locations: [String]
-    }
-  },
-
 
   // Media files
   media: [{
     type: {
       type: String,
-      enum: ['image', 'video', 'audio', 'document'],
+      enum: ['image', 'video', 'gif', 'document'],
       required: true
     },
-    url: {
-      type: String,
-      required: true
-    },
+    url: String,
     filename: String,
     size: Number,
-    duration: Number, // for video/audio
-    dimensions: {
-      width: Number,
-      height: Number
-    },
-    thumbnail_url: String,
-    alt_text: String,
-    order: {
-      type: Number,
-      default: 0
-    }
+    mimeType: String,
+    thumbnail_url: String
   }],
 
-  // Scheduling
+  // Scheduling and publishing
   scheduling: {
     scheduled_for: Date,
-    timezone: {
-      type: String,
-      default: 'UTC'
-    },
-    auto_publish: {
-      type: Boolean,
-      default: false
-    },
-    optimal_time_suggestion: {
-      suggested_time: Date,
-      confidence_score: Number,
-      reasoning: String
-    }
+    timezone: String
   },
-
-  // Publishing details
   publishing: {
     published_at: Date,
-    platform_post_id: String,
-    platform_url: String,
-    error_message: String,
-    retry_count: {
-      type: Number,
-      default: 0
-    },
-    last_retry_at: Date
+    platform_post_id: String, // ID from the social platform
+    platform_url: String // URL to the published post
   },
 
-  // Analytics tracking
+  // Analytics (updated after publishing)
   analytics: {
-    views: {
-      type: Number,
-      default: 0
-    },
-    likes: {
-      type: Number,
-      default: 0
-    },
-    comments: {
-      type: Number,
-      default: 0
-    },
-    shares: {
-      type: Number,
-      default: 0
-    },
-    saves: {
-      type: Number,
-      default: 0
-    },
-    clicks: {
-      type: Number,
-      default: 0
-    },
-    reach: {
-      type: Number,
-      default: 0
-    },
-    impressions: {
-      type: Number,
-      default: 0
-    },
-    engagement_rate: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100
-    },
-    last_updated: Date
-  },
-
-  // AI suggestions
-  ai_suggestions: {
-    caption_suggestions: [String],
-    hashtag_suggestions: [String],
-    optimal_posting_time: Date,
-    engagement_prediction: {
-      score: Number,
-      factors: [String]
-    },
-    content_score: {
-      overall: Number,
-      readability: Number,
-      sentiment: Number,
-      trending_relevance: Number
-    }
+    likes: { type: Number, default: 0 },
+    comments: { type: Number, default: 0 },
+    shares: { type: Number, default: 0 },
+    views: { type: Number, default: 0 },
+    engagement_rate: { type: Number, default: 0 }
   },
 
   // Metadata
-  metadata: {
-    draft_version: {
-      type: Number,
-      default: 1
-    },
-    is_template: {
-      type: Boolean,
-      default: false
-    },
-    template_name: String,
-    tags: [String],
-    notes: String,
-    collaborators: [{
-      user_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      role: {
-        type: String,
-        enum: ['editor', 'reviewer', 'viewer']
-      },
-      permissions: [String]
-    }]
+  tags: [{
+    type: String,
+    trim: true
+  }],
+  categories: [{
+    type: String,
+    trim: true
+  }],
+  
+  version: {
+    type: Number,
+    default: 1
+  },
+  lastEditedAt: {
+    type: Date,
+    default: Date.now
+  },
+
+  // Error handling
+  error: {
+    message: String,
+    code: String,
+    occurred_at: Date
   }
+
 }, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  timestamps: true
 });
 
-// Indexes for performance
-postSchema.index({ user_id: 1, platform: 1 });
-postSchema.index({ status: 1 });
-postSchema.index({ 'scheduling.scheduled_for': 1 });
-postSchema.index({ platform: 1, post_type: 1 });
-postSchema.index({ createdAt: -1 });
-
-// Virtual for engagement rate calculation
-postSchema.virtual('calculated_engagement_rate').get(function() {
-  const totalEngagement = this.analytics.likes + this.analytics.comments + this.analytics.shares;
-  return this.analytics.reach > 0 ? (totalEngagement / this.analytics.reach) * 100 : 0;
-});
+// Indexes for better query performance
+PostSchema.index({ author: 1, status: 1 });
+PostSchema.index({ platform: 1, status: 1 });
+PostSchema.index({ 'scheduling.scheduled_for': 1 });
+PostSchema.index({ createdAt: -1 });
+PostSchema.index({ 'publishing.published_at': -1 });
 
 // Pre-save middleware
-postSchema.pre('save', function(next) {
-  // Auto-generate hashtags from content if not provided
-  if (this.content.caption && (!this.content.hashtags || this.content.hashtags.length === 0)) {
-    const hashtagRegex = /#[\w]+/g;
-    const hashtags = this.content.caption.match(hashtagRegex);
-    if (hashtags) {
-      this.content.hashtags = hashtags.map(tag => tag.substring(1));
-    }
+PostSchema.pre('save', function(next) {
+  if (this.isModified() && !this.isNew) {
+    this.lastEditedAt = new Date();
   }
-
-  // Auto-generate mentions from content if not provided
-  if (this.content.caption && (!this.content.mentions || this.content.mentions.length === 0)) {
-    const mentionRegex = /@[\w]+/g;
-    const mentions = this.content.caption.match(mentionRegex);
-    if (mentions) {
-      this.content.mentions = mentions.map(mention => mention.substring(1));
-    }
+  
+  // Auto-increment version when content changes
+  if (this.isModified('content') || this.isModified('platform_content')) {
+    this.version += 1;
   }
-
-  // Validate platform-specific content
-  if (this.platform === 'youtube' && this.post_type === 'video') {
-    if (!this.youtube_content.title) {
-      return next(new Error('YouTube video title is required'));
-    }
-  }
-
-  if (this.platform === 'twitter' && this.content.caption && this.content.caption.length > 280) {
-    return next(new Error('Twitter post cannot exceed 280 characters'));
-  }
-
+  
   next();
 });
 
-// Static methods
-postSchema.statics.findByUser = function(userId, filters = {}) {
-  return this.find({ user_id: userId, ...filters })
-    .populate('campaign_id', 'title')
-    .sort({ createdAt: -1 });
+// Virtual for post age
+PostSchema.virtual('age').get(function() {
+  return Date.now() - this.createdAt;
+});
+
+// Method to check if post is scheduled
+PostSchema.methods.isScheduled = function() {
+  return this.status === 'scheduled' && this.scheduling.scheduled_for > new Date();
 };
 
-postSchema.statics.findByPlatform = function(platform, filters = {}) {
-  return this.find({ platform, ...filters })
-    .populate('user_id', 'name email')
-    .sort({ createdAt: -1 });
+// Method to check if post can be published
+PostSchema.methods.canPublish = function() {
+  return this.status === 'draft' || this.status === 'scheduled';
 };
 
-postSchema.statics.findScheduled = function() {
-  return this.find({
+// Static method to get posts by platform
+PostSchema.statics.findByPlatform = function(platform, status = null) {
+  const query = { platform };
+  if (status) query.status = status;
+  return this.find(query).sort({ createdAt: -1 });
+};
+
+// Static method to get scheduled posts
+PostSchema.statics.getScheduledPosts = function() {
+  return this.find({ 
     status: 'scheduled',
-    'scheduling.scheduled_for': { $lte: new Date() }
-  });
+    'scheduling.scheduled_for': { $gte: new Date() }
+  }).sort({ 'scheduling.scheduled_for': 1 });
 };
 
-postSchema.statics.getAnalyticsSummary = function(userId, platform = null) {
-  const match = { user_id: mongoose.Types.ObjectId(userId) };
-  if (platform) match.platform = platform;
-
-  return this.aggregate([
-    { $match: match },
-    {
-      $group: {
-        _id: '$platform',
-        total_posts: { $sum: 1 },
-        total_views: { $sum: '$analytics.views' },
-        total_likes: { $sum: '$analytics.likes' },
-        total_comments: { $sum: '$analytics.comments' },
-        total_shares: { $sum: '$analytics.shares' },
-        avg_engagement_rate: { $avg: '$analytics.engagement_rate' }
-      }
-    }
-  ]);
-};
-
-// Instance methods
-postSchema.methods.publish = async function() {
-  this.status = 'published';
-  this.publishing.published_at = new Date();
-  return this.save();
-};
-
-postSchema.methods.schedule = function(scheduledFor) {
-  this.status = 'scheduled';
-  this.scheduling.scheduled_for = scheduledFor;
-  return this.save();
-};
-
-postSchema.methods.updateAnalytics = function(analyticsData) {
-  Object.assign(this.analytics, analyticsData);
-  this.analytics.last_updated = new Date();
-  return this.save();
-};
-
-module.exports = mongoose.model('Post', postSchema);
+module.exports = mongoose.model('Post', PostSchema);

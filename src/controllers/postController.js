@@ -1,533 +1,370 @@
-// src/controllers/postController.js
 const Post = require('../models/Post');
 const User = require('../models/User');
-const logger = require('../utils/logger');
-const { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES, PAGINATION } = require('../utils/constants');
-const { asyncHandler } = require('../middlewares/errorHandler');
-const twitterService = require('../services/social/twitter');
-const youtubeService = require('../services/social/youtube');
+const { validationResult } = require('express-validator');
+const path = require('path');
 
-/**
- * Create a new post
- */
-const createPost = asyncHandler(async (req, res) => {
-  const postData = {
-    ...req.body,
-    user_id: req.userId
-  };
-
-  // Validate platform-specific requirements
-  const { platform, post_type } = postData;
+class PostController {
   
-  if (platform === 'youtube' && post_type === 'video') {
-    if (!postData.youtube_content?.title) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        success: false,
-        message: 'YouTube video title is required'
+  // Create a new post
+  async createPost(req, res) {
+    try {
+      console.log('📝 Creating new post:', {
+        body: req.body,
+        files: req.files?.length || 0,
+        userId: req.user?._id
       });
-    }
-  }
 
-  if (platform === 'twitter' && postData.content?.caption?.length > 280) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: 'Twitter post cannot exceed 280 characters'
-    });
-  }
-
-  const post = new Post(postData);
-  await post.save();
-
-  logger.info('Post created', { postId: post._id, userId: req.userId, platform });
-
-  res.status(HTTP_STATUS.CREATED).json({
-    success: true,
-    message: SUCCESS_MESSAGES.POST_CREATED || 'Post created successfully',
-    data: { post }
-  });
-});
-
-/**
- * Get all posts with filtering and pagination
- */
-const getPosts = asyncHandler(async (req, res) => {
-  const {
-    page = PAGINATION.DEFAULT_PAGE,
-    limit = PAGINATION.DEFAULT_LIMIT,
-    platform,
-    status,
-    post_type,
-    sort = '-createdAt'
-  } = req.query;
-
-  // Build filter object
-  const filter = { user_id: req.userId };
-  
-  if (platform) filter.platform = platform;
-  if (status) filter.status = status;
-  if (post_type) filter.post_type = post_type;
-
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-
-  const posts = await Post.find(filter)
-    .populate('campaign_id', 'title description')
-    .sort(sort)
-    .skip(skip)
-    .limit(parseInt(limit));
-
-  const total = await Post.countDocuments(filter);
-
-  logger.info('Posts retrieved', { count: posts.length, total, userId: req.userId });
-
-  res.json({
-    success: true,
-    data: {
-      posts,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array()
+        });
       }
-    }
-  });
-});
 
-/**
- * Get post by ID
- */
-const getPost = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+      const {
+        title,
+        content,
+        status = 'draft',
+        scheduledAt,
+        platformContent,
+        tags,
+        categories
+      } = req.body;
 
-  const post = await Post.findById(id)
-    .populate('campaign_id', 'title description')
-    .populate('user_id', 'name email');
+      // Parse JSON strings if they exist
+      let parsedPlatformContent = {};
+      let parsedTags = [];
+      let parsedCategories = [];
 
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
-
-  // Check ownership
-  if (post.user_id._id.toString() !== req.userId.toString() && req.user.role !== 'admin') {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
-
-  res.json({
-    success: true,
-    data: { post }
-  });
-});
-
-/**
- * Update post
- */
-const updatePost = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const post = await Post.findById(id);
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
-
-  // Check ownership
-  if (post.user_id.toString() !== req.userId.toString() && req.user.role !== 'admin') {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
-
-  // Don't allow updating published posts
-  if (post.status === 'published') {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: 'Cannot update published posts'
-    });
-  }
-
-  Object.assign(post, req.body);
-  post.metadata.draft_version += 1;
-  await post.save();
-
-  logger.info('Post updated', { postId: id, userId: req.userId });
-
-  res.json({
-    success: true,
-    message: 'Post updated successfully',
-    data: { post }
-  });
-});
-
-/**
- * Delete post
- */
-const deletePost = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const post = await Post.findById(id);
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
-
-  // Check ownership
-  if (post.user_id.toString() !== req.userId.toString() && req.user.role !== 'admin') {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
-
-  await Post.findByIdAndDelete(id);
-
-  logger.info('Post deleted', { postId: id, userId: req.userId });
-
-  res.json({
-    success: true,
-    message: 'Post deleted successfully'
-  });
-});
-
-/**
- * Publish post immediately
- */
-const publishPost = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const post = await Post.findById(id);
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
-
-  // Check ownership
-  if (post.user_id.toString() !== req.userId.toString()) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
-
-  if (post.status === 'published') {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: 'Post is already published'
-    });
-  }
-
-  try {
-    // Get user's social accounts
-    const user = await User.findById(req.userId);
-    
-    let publishResult = null;
-
-    // Platform-specific publishing logic
-    switch (post.platform) {
-      case 'twitter':
-        if (!user.socialAccounts?.twitter?.accessToken) {
-          throw new Error('Twitter account not connected');
+      try {
+        if (platformContent) {
+          parsedPlatformContent = typeof platformContent === 'string' 
+            ? JSON.parse(platformContent) 
+            : platformContent;
         }
-        
-        // Check if token is expired and refresh if needed
-        let accessToken = user.socialAccounts.twitter.accessToken;
-        if (user.socialAccounts.twitter.expiresAt < new Date()) {
-          const refreshResult = await twitterService.refreshToken(user.socialAccounts.twitter.refreshToken);
-          if (refreshResult.success) {
-            accessToken = refreshResult.access_token;
-            await User.findByIdAndUpdate(req.userId, {
-              $set: {
-                'socialAccounts.twitter.accessToken': refreshResult.access_token,
-                'socialAccounts.twitter.refreshToken': refreshResult.refresh_token,
-                'socialAccounts.twitter.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
-              }
-            });
-          } else {
-            throw new Error('Failed to refresh Twitter token');
-          }
+        if (tags) {
+          parsedTags = typeof tags === 'string' 
+            ? JSON.parse(tags) 
+            : Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim());
         }
-
-        const tweetContent = post.content.caption || '';
-        publishResult = await twitterService.postTweet(accessToken, tweetContent);
-        
-        if (publishResult.success) {
-          post.publishing.platform_post_id = publishResult.data.id;
-          post.publishing.platform_url = `https://twitter.com/${user.socialAccounts.twitter.username}/status/${publishResult.data.id}`;
+        if (categories) {
+          parsedCategories = typeof categories === 'string' 
+            ? JSON.parse(categories) 
+            : Array.isArray(categories) ? categories : categories.split(',').map(c => c.trim());
         }
-        break;
+      } catch (parseError) {
+        console.error('Error parsing JSON fields:', parseError);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid JSON in request data'
+        });
+      }
 
-      case 'youtube':
-        if (!user.socialAccounts?.youtube?.accessToken) {
-          throw new Error('YouTube account not connected');
+      // Process uploaded media files
+      const mediaFiles = [];
+      if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+          const mediaItem = {
+            type: file.mimetype.startsWith('image') ? 'image' : 'video',
+            url: `/uploads/${file.filename}`,
+            filename: file.filename,
+            size: file.size,
+            mimeType: file.mimetype
+          };
+          mediaFiles.push(mediaItem);
         }
-        
-        if (!post.media || post.media.length === 0) {
-          throw new Error('Video file is required for YouTube posts');
-        }
+      }
 
-        // For YouTube, we need to read the actual file from the stored path
-        const fs = require('fs');
-        const path = require('path');
-        
-        try {
-          // Get the file path from media
-          const mediaPath = post.media[0].url;
-          
-          // Check if file exists
-          if (!fs.existsSync(mediaPath)) {
-            throw new Error('Video file not found on server');
-          }
-          
-          // Read file as buffer
-          const videoBuffer = fs.readFileSync(mediaPath);
-          
-          // Check if token is expired and refresh if needed
-          let accessToken = user.socialAccounts.youtube.accessToken;
-          if (user.socialAccounts.youtube.expiresAt < new Date()) {
-            const refreshResult = await youtubeService.refreshToken(user.socialAccounts.youtube.refreshToken);
-            if (refreshResult.success) {
-              accessToken = refreshResult.access_token;
-              // Update user with new token
-              await User.findByIdAndUpdate(req.userId, {
-                $set: {
-                  'socialAccounts.youtube.accessToken': refreshResult.access_token,
-                  'socialAccounts.youtube.refreshToken': refreshResult.refresh_token,
-                  'socialAccounts.youtube.expiresAt': new Date(Date.now() + refreshResult.expires_in * 1000)
-                }
-              });
-            } else {
-              throw new Error('Failed to refresh YouTube token');
-            }
-          }
-
-          // Upload video to YouTube
-          publishResult = await youtubeService.uploadVideo(
-            accessToken,
-            videoBuffer,
-            post.youtube_content.title,
-            post.youtube_content.description || post.content.caption,
-            post.youtube_content.tags || []
-          );
-          
-          if (publishResult.success) {
-            post.publishing.platform_post_id = publishResult.data.id;
-            post.publishing.platform_url = `https://www.youtube.com/watch?v=${publishResult.data.id}`;
-          }
-          
-          // Clean up the local file after successful upload
-          try {
-            fs.unlinkSync(mediaPath);
-          } catch (cleanupError) {
-            console.warn('Failed to cleanup video file:', cleanupError.message);
-          }
-          
-        } catch (fileError) {
-          throw new Error(`YouTube upload failed: ${fileError.message}`);
-        }
-        break;
-
-      case 'instagram':
-        // Instagram publishing would be implemented here
-        throw new Error('Instagram publishing not yet implemented');
-
-      case 'linkedin':
-        // LinkedIn publishing would be implemented here
-        throw new Error('LinkedIn publishing not yet implemented');
-
-      case 'facebook':
-        // Facebook publishing would be implemented here
-        throw new Error('Facebook publishing not yet implemented');
-
-      default:
-        throw new Error(`Publishing to ${post.platform} is not supported`);
-    }
-
-    if (publishResult && publishResult.success) {
-      await post.publish();
-      
-      logger.info('Post published successfully', { 
-        postId: id, 
-        userId: req.userId, 
-        platform: post.platform,
-        platformPostId: post.publishing.platform_post_id
+      const post = new Post({
+        title,
+        content,
+        author: req.user._id,
+        status,
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
+        platformContent: parsedPlatformContent,
+        tags: parsedTags,
+        categories: parsedCategories,
+        media: mediaFiles
       });
+
+      await post.save();
+      await post.populate('author', 'username email');
+
+      console.log('✅ Post created successfully:', post._id);
+
+      res.status(201).json({
+        success: true,
+        message: 'Post created successfully',
+        post
+      });
+
+    } catch (error) {
+      console.error('❌ Error creating post:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to create post'
+      });
+    }
+  }
+
+  // Get user's posts
+  async getUserPosts(req, res) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        status,
+        search
+      } = req.query;
+
+      const query = { author: req.user._id };
+
+      if (status) query.status = status;
+      if (search) {
+        query.$or = [
+          { title: { $regex: search, $options: 'i' } },
+          { content: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      const skip = (pageNum - 1) * limitNum;
+
+      const [posts, total] = await Promise.all([
+        Post.find(query)
+          .sort({ lastEditedAt: -1, createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .populate('author', 'username email'),
+        Post.countDocuments(query)
+      ]);
 
       res.json({
         success: true,
-        message: 'Post published successfully',
-        data: { 
-          post,
-          platform_url: post.publishing.platform_url
+        posts,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum)
         }
       });
-    } else {
-      throw new Error(publishResult?.error || 'Failed to publish post');
+
+    } catch (error) {
+      console.error('❌ Error fetching posts:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch posts'
+      });
     }
-
-  } catch (error) {
-    post.status = 'failed';
-    post.publishing.error_message = error.message;
-    post.publishing.retry_count += 1;
-    post.publishing.last_retry_at = new Date();
-    await post.save();
-
-    logger.error('Post publishing failed', { 
-      postId: id, 
-      userId: req.userId, 
-      platform: post.platform,
-      error: error.message 
-    });
-
-    res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: `Failed to publish post: ${error.message}`,
-      data: { post }
-    });
-  }
-});
-
-/**
- * Schedule post for later publishing
- */
-const schedulePost = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { scheduled_for, timezone } = req.body;
-
-  if (!scheduled_for) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: 'Scheduled time is required'
-    });
   }
 
-  const scheduledDate = new Date(scheduled_for);
-  if (scheduledDate <= new Date()) {
-    return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      success: false,
-      message: 'Scheduled time must be in the future'
-    });
-  }
+  // Get a specific post
+  async getPost(req, res) {
+    try {
+      const { id } = req.params;
+      
+      const post = await Post.findOne({
+        _id: id,
+        author: req.user._id
+      }).populate('author', 'username email');
 
-  const post = await Post.findById(id);
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
+      if (!post) {
+        return res.status(404).json({
+          success: false,
+          message: 'Post not found'
+        });
+      }
 
-  // Check ownership
-  if (post.user_id.toString() !== req.userId.toString()) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
+      res.json({
+        success: true,
+        post
+      });
 
-  post.scheduling.scheduled_for = scheduledDate;
-  post.scheduling.timezone = timezone || 'UTC';
-  await post.schedule(scheduledDate);
-
-  logger.info('Post scheduled', { 
-    postId: id, 
-    userId: req.userId, 
-    scheduledFor: scheduledDate 
-  });
-
-  res.json({
-    success: true,
-    message: 'Post scheduled successfully',
-    data: { post }
-  });
-});
-
-/**
- * Get post analytics
- */
-const getPostAnalytics = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const post = await Post.findById(id);
-  if (!post) {
-    return res.status(HTTP_STATUS.NOT_FOUND).json({
-      success: false,
-      message: 'Post not found'
-    });
-  }
-
-  // Check ownership
-  if (post.user_id.toString() !== req.userId.toString() && req.user.role !== 'admin') {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      success: false,
-      message: ERROR_MESSAGES.ACCESS_DENIED
-    });
-  }
-
-  res.json({
-    success: true,
-    data: { 
-      analytics: post.analytics,
-      calculated_engagement_rate: post.calculated_engagement_rate
+    } catch (error) {
+      console.error('❌ Error fetching post:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch post'
+      });
     }
-  });
-});
+  }
 
-/**
- * Get user's posts analytics summary
- */
-const getUserPostsAnalytics = asyncHandler(async (req, res) => {
-  const { platform } = req.query;
+  // Update a post
+  async updatePost(req, res) {
+    try {
+      const { id } = req.params;
+      const updateData = { ...req.body };
 
-  const summary = await Post.getAnalyticsSummary(req.userId, platform);
+      // Parse JSON strings
+      if (updateData.platformContent && typeof updateData.platformContent === 'string') {
+        updateData.platformContent = JSON.parse(updateData.platformContent);
+      }
+      if (updateData.tags && typeof updateData.tags === 'string') {
+        updateData.tags = JSON.parse(updateData.tags);
+      }
+      if (updateData.categories && typeof updateData.categories === 'string') {
+        updateData.categories = JSON.parse(updateData.categories);
+      }
 
-  res.json({
-    success: true,
-    data: { analytics_summary: summary }
-  });
-});
+      const post = await Post.findOneAndUpdate(
+        { _id: id, author: req.user._id },
+        { $set: updateData },
+        { new: true }
+      ).populate('author', 'username email');
 
-/**
- * Get platform-specific post templates
- */
-const getPostTemplates = asyncHandler(async (req, res) => {
-  const { platform } = req.params;
+      if (!post) {
+        return res.status(404).json({
+          success: false,
+          message: 'Post not found'
+        });
+      }
 
-  const templates = await Post.find({
-    'metadata.is_template': true,
-    platform: platform,
-    $or: [
-      { user_id: req.userId },
-      { 'metadata.template_visibility': 'public' }
-    ]
-  }).select('content platform post_type metadata.template_name');
+      res.json({
+        success: true,
+        message: 'Post updated successfully',
+        post
+      });
 
-  res.json({
-    success: true,
-    data: { templates }
-  });
-});
+    } catch (error) {
+      console.error('❌ Error updating post:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update post'
+      });
+    }
+  }
 
-module.exports = {
-  createPost,
-  getPosts,
-  getPost,
-  updatePost,
-  deletePost,
-  publishPost,
-  schedulePost,
-  getPostAnalytics,
-  getUserPostsAnalytics,
-  getPostTemplates
-};
+  // Delete a post
+  async deletePost(req, res) {
+    try {
+      const { id } = req.params;
+
+      const post = await Post.findOneAndDelete({
+        _id: id,
+        author: req.user._id
+      });
+
+      if (!post) {
+        return res.status(404).json({
+          success: false,
+          message: 'Post not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Post deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('❌ Error deleting post:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to delete post'
+      });
+    }
+  }
+
+  // Get drafts
+  async getDrafts(req, res) {
+    try {
+      const { page = 1, limit = 10 } = req.query;
+      
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      const skip = (pageNum - 1) * limitNum;
+
+      const [drafts, total] = await Promise.all([
+        Post.find({ 
+          author: req.user._id, 
+          status: 'draft' 
+        })
+        .sort({ lastEditedAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('author', 'username email'),
+        Post.countDocuments({
+          author: req.user._id,
+          status: 'draft'
+        })
+      ]);
+
+      res.json({
+        success: true,
+        drafts,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum)
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error fetching drafts:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch drafts'
+      });
+    }
+  }
+
+  // Validate content
+  async validateContent(req, res) {
+    try {
+      const { content, platforms = [] } = req.body;
+
+      const validation = {
+        isValid: true,
+        errors: [],
+        warnings: [],
+        suggestions: []
+      };
+
+      if (!content || content.trim().length === 0) {
+        validation.isValid = false;
+        validation.errors.push('Content cannot be empty');
+      }
+
+      // Platform-specific validation
+      for (const platform of platforms) {
+        switch (platform) {
+          case 'twitter':
+            if (content.length > 280) {
+              validation.errors.push('Twitter content exceeds 280 characters');
+              validation.isValid = false;
+            }
+            break;
+          case 'linkedin':
+            if (content.length > 3000) {
+              validation.warnings.push('LinkedIn posts over 3000 characters may be truncated');
+            }
+            break;
+          case 'youtube':
+            if (content.length > 5000) {
+              validation.warnings.push('YouTube descriptions over 5000 characters may be truncated');
+            }
+            break;
+        }
+      }
+
+      res.json({
+        success: true,
+        validation
+      });
+
+    } catch (error) {
+      console.error('❌ Error validating content:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to validate content'
+      });
+    }
+  }
+}
+
+module.exports = new PostController();

@@ -5,21 +5,33 @@ const twitterController = require('../controllers/twitterController');
 const { authenticate } = require('../middlewares/auth');
 const upload = require('../middlewares/upload');
 
-// Auth URL: require authentication for both GET and POST to bind user in state
-router.post('/auth-url', authenticate, twitterController.generateAuthURL);
-router.get('/auth-url', authenticate, twitterController.generateAuthURL);
+// ===== PUBLIC ROUTES =====
+// OAuth flow routes (no authentication required)
+router.post('/auth-url', authenticate, twitterController.generateAuthURL); // POST preferred for auth URL
 router.get('/callback', twitterController.handleCallback);
 
-// Test route to verify callback is accessible
+// Test route
 router.get('/callback-test', (req, res) => {
-  res.json({ success: true, message: 'Callback route is accessible', timestamp: new Date().toISOString() });
+  res.json({ 
+    success: true, 
+    message: 'Twitter routes are working', 
+    timestamp: new Date().toISOString() 
+  });
 });
 
-// Protected routes (require your app's JWT)
+// ===== PROTECTED ROUTES =====
+// All routes below require authentication
 router.use(authenticate);
-router.delete('/disconnect', twitterController.disconnect);
+
+// Account management
 router.get('/profile', twitterController.getProfile);
-router.post('/tweet', twitterController.postTweet);
+router.get('/validate', twitterController.validateConnection);
+router.delete('/disconnect', twitterController.disconnect);
+
+// Content posting - main endpoint for all post types
+router.post('/post', twitterController.postContent); // Handles: post, thread, poll
+
+// Media management
 router.post('/upload-media', upload.single('media'), twitterController.uploadMedia);
 
 module.exports = router;
