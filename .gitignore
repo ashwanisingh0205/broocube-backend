@@ -1,8 +1,4 @@
-# Environment files
-.env
-.env.local
-.env.production
-.env.test
+
 
 # Logs
 logs
