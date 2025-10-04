@@ -8,6 +8,7 @@ class TwitterService {
     this.clientId = config.TWITTER_CLIENT_ID;
     this.clientSecret = config.TWITTER_CLIENT_SECRET;
     this.baseURL = 'https://api.twitter.com/2';
+    this.uploadURL = 'https://upload.twitter.com/1.1'; // Fixed: Added missing uploadURL
     this.authURL = 'https://twitter.com/i/oauth2/authorize';
     this.tokenURL = 'https://api.twitter.com/2/oauth2/token';
     this.codeVerifiers = new Map();
@@ -109,15 +110,23 @@ class TwitterService {
     }
   }
 
-  // Add other Twitter API methods (post tweet, get user info, etc.)
-  async postTweet(accessToken, text, options = {}) {
+  // Post a single tweet with optional media
+  async postTweet(accessToken, text, mediaIds = []) {
     try {
+      const tweetData = {
+        text: text.substring(0, 280) // Twitter character limit
+      };
+
+      // Add media attachments if provided
+      if (mediaIds && mediaIds.length > 0) {
+        tweetData.media = {
+          media_ids: mediaIds
+        };
+      }
+
       const response = await axios.post(
         `${this.baseURL}/tweets`,
-        {
-          text: text.substring(0, 280), // Twitter character limit
-          ...options
-        },
+        tweetData,
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -129,7 +138,8 @@ class TwitterService {
       return {
         success: true,
         tweet_id: response.data.data.id,
-        text: response.data.data.text
+        text: response.data.data.text,
+        media_count: mediaIds ? mediaIds.length : 0
       };
     } catch (error) {
       console.error('Twitter post error:', error.response?.data || error.message);
@@ -140,6 +150,83 @@ class TwitterService {
       };
     }
   }
+
+  // Post a thread (multiple connected tweets)
+  async postThread(accessToken, threadTweets) {
+    try {
+      if (!Array.isArray(threadTweets) || threadTweets.length === 0) {
+        return {
+          success: false,
+          error: 'Thread must contain at least one tweet'
+        };
+      }
+
+      if (threadTweets.length > 25) {
+        return {
+          success: false,
+          error: 'Thread cannot exceed 25 tweets'
+        };
+      }
+
+      const results = [];
+      let replyToId = null;
+
+      for (let i = 0; i < threadTweets.length; i++) {
+        const tweetText = threadTweets[i].substring(0, 280);
+        
+        const tweetData = {
+          text: tweetText
+        };
+
+        // Add reply reference for subsequent tweets
+        if (replyToId) {
+          tweetData.reply = {
+            in_reply_to_tweet_id: replyToId
+          };
+        }
+
+        const response = await axios.post(
+          `${this.baseURL}/tweets`,
+          tweetData,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        const tweetId = response.data.data.id;
+        results.push({
+          tweet_id: tweetId,
+          text: tweetText,
+          position: i + 1
+        });
+
+        replyToId = tweetId;
+
+        // Add small delay between tweets to avoid rate limiting
+        if (i < threadTweets.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      return {
+        success: true,
+        thread_id: results[0].tweet_id, // First tweet ID as thread identifier
+        tweets: results,
+        total_tweets: results.length
+      };
+    } catch (error) {
+      console.error('Twitter thread post error:', error.response?.data || error.message);
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to post thread',
+        statusCode: error.response?.status,
+      };
+    }
+  }
+
   async postPoll(accessToken, text, poll) {
     try {
       const { options, durationMinutes } = poll;
@@ -196,12 +283,26 @@ class TwitterService {
       };
     }
   }
-  // Upload media (images, GIFs)
+  // Upload media (images, GIFs, videos)
   async uploadMedia(accessToken, mediaBuffer, mimeType) {
     try {
+      // Determine media type and appropriate endpoint
+      const isVideo = mimeType.startsWith('video/');
+      const isGif = mimeType === 'image/gif';
+      
+      // For videos, we need to use chunked upload
+      if (isVideo) {
+        return await this.uploadVideoChunked(accessToken, mediaBuffer, mimeType);
+      }
+
+      // For images and GIFs, use simple upload
+      const FormData = require('form-data');
       const formData = new FormData();
-      const blob = new Blob([mediaBuffer], { type: mimeType });
-      formData.append('media', blob);
+      
+      formData.append('media', mediaBuffer, {
+        filename: `media.${mimeType.split('/')[1]}`,
+        contentType: mimeType
+      });
 
       const response = await axios.post(
         `${this.uploadURL}/media/upload.json`,
@@ -218,6 +319,7 @@ class TwitterService {
         success: true,
         media_id: response.data.media_id_string,
         size: response.data.size,
+        type: isGif ? 'gif' : 'image',
         image: response.data.image
       };
     } catch (error) {
@@ -225,6 +327,124 @@ class TwitterService {
       return {
         success: false,
         error: error.response?.data?.errors?.[0]?.message || 'Failed to upload media',
+        statusCode: error.response?.status,
+      };
+    }
+  }
+
+  // Upload video using chunked upload (required for videos > 5MB)
+  async uploadVideoChunked(accessToken, videoBuffer, mimeType) {
+    try {
+      const FormData = require('form-data');
+      
+      // Step 1: Initialize upload
+      const initFormData = new FormData();
+      initFormData.append('command', 'INIT');
+      initFormData.append('media_type', mimeType);
+      initFormData.append('total_bytes', videoBuffer.length);
+
+      const initResponse = await axios.post(
+        `${this.uploadURL}/media/upload.json`,
+        initFormData,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            ...initFormData.getHeaders()
+          }
+        }
+      );
+
+      const mediaId = initResponse.data.media_id_string;
+      const chunkSize = 5 * 1024 * 1024; // 5MB chunks
+      let segmentIndex = 0;
+
+      // Step 2: Upload chunks
+      for (let offset = 0; offset < videoBuffer.length; offset += chunkSize) {
+        const chunk = videoBuffer.slice(offset, offset + chunkSize);
+        
+        const chunkFormData = new FormData();
+        chunkFormData.append('command', 'APPEND');
+        chunkFormData.append('media_id', mediaId);
+        chunkFormData.append('segment_index', segmentIndex);
+        chunkFormData.append('media', chunk, {
+          filename: `chunk_${segmentIndex}`,
+          contentType: mimeType
+        });
+
+        await axios.post(
+          `${this.uploadURL}/media/upload.json`,
+          chunkFormData,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              ...chunkFormData.getHeaders()
+            }
+          }
+        );
+
+        segmentIndex++;
+      }
+
+      // Step 3: Finalize upload
+      const finalizeFormData = new FormData();
+      finalizeFormData.append('command', 'FINALIZE');
+      finalizeFormData.append('media_id', mediaId);
+
+      const finalizeResponse = await axios.post(
+        `${this.uploadURL}/media/upload.json`,
+        finalizeFormData,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            ...finalizeFormData.getHeaders()
+          }
+        }
+      );
+
+      return {
+        success: true,
+        media_id: mediaId,
+        size: videoBuffer.length,
+        type: 'video',
+        processing_info: finalizeResponse.data.processing_info
+      };
+    } catch (error) {
+      console.error('Twitter video upload error:', error.response?.data || error.message);
+      return {
+        success: false,
+        error: error.response?.data?.errors?.[0]?.message || 'Failed to upload video',
+        statusCode: error.response?.status,
+      };
+    }
+  }
+
+  // Check media processing status (for videos)
+  async checkMediaStatus(accessToken, mediaId) {
+    try {
+      const response = await axios.get(
+        `${this.uploadURL}/media/upload.json`,
+        {
+          params: {
+            command: 'STATUS',
+            media_id: mediaId
+          },
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        }
+      );
+
+      return {
+        success: true,
+        media_id: mediaId,
+        processing_info: response.data.processing_info,
+        ready: response.data.processing_info?.state === 'succeeded'
+      };
+    } catch (error) {
+      console.error('Twitter media status check error:', error.response?.data || error.message);
+      return {
+        success: false,
+        error: error.response?.data?.errors?.[0]?.message || 'Failed to check media status',
         statusCode: error.response?.status,
       };
     }

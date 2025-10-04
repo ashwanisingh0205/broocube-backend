@@ -232,6 +232,30 @@ class TwitterController {
     }
   }
 
+  // Check media processing status
+  async checkMediaStatus(req, res) {
+    try {
+      const { mediaId } = req.params;
+      const userId = req.user.id;
+      const user = await User.findById(userId);
+
+      if (!user || !user.socialAccounts?.twitter?.accessToken) {
+        return res.status(400).json({ success: false, error: 'Twitter account not connected' });
+      }
+
+      const result = await twitterService.checkMediaStatus(user.socialAccounts.twitter.accessToken, mediaId);
+
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error('Twitter media status check error:', error);
+      res.status(500).json({ success: false, error: 'Failed to check media status' });
+    }
+  }
+
   // Get Twitter profile
   async getProfile(req, res) {
     try {
